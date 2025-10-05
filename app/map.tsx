@@ -2,7 +2,7 @@
  * Map Screen - Exibe mapa, localização GPS e informações do tile
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,8 +11,6 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  ScrollView,
-  Dimensions,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,14 +26,14 @@ import { getTileIdFromCoordinates } from '@/utils/hilbertCurve';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ConversionResult } from '@/types';
 
-const { width: screenWidth } = Dimensions.get('window');
+const formatCoordinate = (value: number, decimals = 6) => value.toFixed(decimals);
+const formatDistance = (meters: number): string =>
+  meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${meters.toFixed(0)} m`;
 
 export default function MapScreen() {
   const { theme } = useTheme();
   const {
     currentLocation,
-    isLoading: locationLoading,
-    error: locationError,
     hasPermission,
     requestPermission,
     getCurrentLocation,
@@ -64,36 +62,9 @@ export default function MapScreen() {
       await getCurrentLocation();
     };
     initLocation();
-  }, [hasPermission]);
+  }, [getCurrentLocation, hasPermission, requestPermission]);
 
-  useEffect(() => {
-    if (currentLocation) {
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: true,
-      }).start();
-
-      // Centraliza o mapa na nova localização
-      if (mapRef.current) {
-        mapRef.current.animateToRegion(
-          {
-            latitude: currentLocation.latitude,
-            longitude: currentLocation.longitude,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
-          },
-          800
-        );
-      }
-
-      calculateTileInfo();
-    } else {
-      fadeAnim.setValue(0);
-    }
-  }, [currentLocation, selectedLevel]);
-
-  const calculateTileInfo = async () => {
+  const calculateTileInfo = useCallback(async () => {
     if (!currentLocation) return;
     setIsConverting(true);
 
@@ -126,22 +97,49 @@ export default function MapScreen() {
     } finally {
       setIsConverting(false);
     }
-  };
+  }, [currentLocation, selectedLevel]);
 
-  const handleGetLocation = async () => {
+  useEffect(() => {
+    if (currentLocation) {
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }).start();
+
+      // Centraliza o mapa na nova localização
+      if (mapRef.current) {
+        mapRef.current.animateToRegion(
+          {
+            latitude: currentLocation.latitude,
+            longitude: currentLocation.longitude,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          },
+          800
+        );
+      }
+
+      calculateTileInfo();
+    } else {
+      fadeAnim.setValue(0);
+    }
+  }, [calculateTileInfo, currentLocation, fadeAnim]);
+
+  const handleGetLocation = useCallback(async () => {
     if (!hasPermission) {
       const granted = await requestPermission();
       if (!granted) return;
     }
     await getCurrentLocation();
-  };
+  }, [getCurrentLocation, hasPermission, requestPermission]);
 
-  const handleToggleTracking = () => {
+  const handleToggleTracking = useCallback(() => {
     if (isWatching) stopWatching();
     else startWatching();
-  };
+  }, [isWatching, startWatching, stopWatching]);
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     Animated.timing(rotateAnim, {
       toValue: 1,
       duration: 600,
@@ -149,16 +147,14 @@ export default function MapScreen() {
       useNativeDriver: true,
     }).start(() => rotateAnim.setValue(0));
     await handleGetLocation();
-  };
+  }, [handleGetLocation, rotateAnim]);
 
   const spin = rotateAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
   });
 
-  const formatCoordinate = (value: number, decimals = 6) => value.toFixed(decimals);
-  const formatDistance = (meters: number): string =>
-    meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${meters.toFixed(0)} m`;
+  const recentQueries = useMemo(() => queryHistory.slice(0, 5), [queryHistory]);
 
   const renderMapView = () => (
     <View style={styles.mapWrapper}>
@@ -268,7 +264,6 @@ export default function MapScreen() {
     );
 
   const renderHistoryCard = () => {
-    const recentQueries = queryHistory.slice(0, 5);
     return (
       <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
         <View style={styles.cardHeader}>

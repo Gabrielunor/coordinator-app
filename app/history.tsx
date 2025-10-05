@@ -95,7 +95,7 @@ function QueryItem({
         <View style={styles.coordSection}>
           <Text style={[styles.label, { color: theme.secondary }]}>SIRGAS 2000 / Albers</Text>
           <Text style={[styles.coordText, { color: theme.text }]}>
-            {formatCoordinate(item.sirgas.easting, 2)} , {formatCoordinate(item.sirgas.northing, 2)} m
+            {formatCoordinate(item.sirgas.easting, 2)}, {formatCoordinate(item.sirgas.northing, 2)} m
           </Text>
         </View>
 

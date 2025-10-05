@@ -94,7 +94,7 @@ export default function ConverterScreen() {
     }
   }, [hasPermission, requestPermission]);
 
-  // Auto-convert when location changes
+  // Auto-convert when location or selected level changes
   useEffect(() => {
     if (currentLocation && hasPermission) {
       performConversion();

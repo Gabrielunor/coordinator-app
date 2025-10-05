@@ -2,10 +2,12 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 
 function TabLayoutContent() {
   const { theme, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <>
@@ -18,8 +20,8 @@ function TabLayoutContent() {
             backgroundColor: theme.surface,
             borderTopColor: theme.border,
             borderTopWidth: 1,
-            paddingBottom: 5,
-            height: 60,
+            paddingBottom: Math.max(insets.bottom, 5),
+            height: 60 + insets.bottom,
             elevation: 8,
             shadowColor: theme.shadow,
             shadowOffset: { width: 0, height: -2 },

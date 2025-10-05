@@ -22,7 +22,7 @@ import { useStorage } from '@/hooks/useStorage';
 import { format } from 'date-fns';
 
 export default function SettingsScreen() {
-  const { theme } = useTheme();
+  const { theme, themeMode } = useTheme();
   const { clearHistory, exportHistory, importHistory, queryHistory } = useStorage();
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -187,7 +187,7 @@ export default function SettingsScreen() {
               Tamanho Estimado: <Text style={{ color: theme.text }}>{estimateHistorySize()}</Text>
             </Text>
             <Text style={[styles.devText, { color: theme.secondary }]}>
-              Tema Atual: <Text style={{ color: theme.text }}>{theme.mode}</Text>
+              Tema Atual: <Text style={{ color: theme.text }}>{themeMode}</Text>
             </Text>
           </View>
         )}

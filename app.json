@@ -1,0 +1,80 @@
+{
+  "expo": {
+    "name": "frontend",
+    "slug": "frontend",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "frontend",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Este aplicativo utiliza sua localização para converter coordenadas e exibir sua posição no mapa."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#000000"
+      },
+      "permissions": [
+        "INTERNET",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "FOREGROUND_SERVICE",
+        "ACCESS_NETWORK_STATE"
+      ],
+      "softwareKeyboardLayoutMode": "pan",
+      "package": "com.gabrielunor.frontend"
+    },
+    "androidStatusBar": {
+      "translucent": true,
+      "backgroundColor": "#000000"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-location",
+      [
+        "expo-maps",
+        {
+          "apiKey": "AIzaSyBk-yG7zGHWkQQP4fjQyqY_k0OJSXIjl54"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35
+          }
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#000000"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "22fd6ee0-a3ca-4c49-8863-32598ed9b6c5"
+      }
+    }
+  }
+}

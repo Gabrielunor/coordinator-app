@@ -1,0 +1,775 @@
+/**
+ * Converter Screen - Interface principal para conversão GPS para SIRGAS
+ */
+
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
+
+import { useLocation } from '@/hooks/useLocation';
+import { useStorage } from '@/hooks/useStorage';
+import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel } from '@/utils/coordinateConversion';
+import { getTileIdFromCoordinates } from '@/utils/hilbertCurve';
+import { useTheme } from '@/contexts/ThemeContext';
+import { StoredQuery, ConversionResult } from '@/types';
+import { format } from 'date-fns';
+
+async function getAddressFromCoordinates(lat: number, lon: number): Promise<string> {
+  try {
+    const response = await fetchWithTimeout(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&addressdetails=1`,
+      {
+        headers: {
+          'User-Agent': 'LabubuInc/1.0 (contact: seuemail@dominio.com)',
+        },
+      },
+      8000
+    );
+    const data = await response.json();
+    if (data?.address) {
+      const { road, suburb, city, town, state, country } = data.address;
+      const parts = [road, suburb || city || town, state, country].filter(Boolean);
+      return parts.length ? parts.join(', ') : 'Endereço não encontrado';
+    }
+    return 'Endereço não encontrado';
+  } catch {
+    return 'Erro ao obter endereço';
+  }
+}
+
+async function fetchWithTimeout(resource, options = {}, timeout = 8000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(resource, { ...options, signal: controller.signal });
+    return response;
+  } catch (error) {
+    throw new Error('Timeout ou falha na conexão');
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+export default function ConverterScreen() {
+  const [address, setAddress] = useState<string | null>(null);
+  const [isFetchingAddress, setIsFetchingAddress] = useState(false);
+  const { theme } = useTheme();
+  const {
+    currentLocation,
+    isLoading: locationLoading,
+    error: locationError,
+    hasPermission,
+    requestPermission,
+    getCurrentLocation,
+    startWatching,
+    stopWatching,
+    isWatching,
+  } = useLocation();
+
+  const {
+    selectedLevel,
+    setSelectedLevel,
+    saveQuery,
+    error: storageError,
+  } = useStorage();
+
+  const [conversionResult, setConversionResult] = useState<ConversionResult | null>(null);
+  const [isConverting, setIsConverting] = useState(false);
+
+  // Request permission on mount
+  useEffect(() => {
+    if (!hasPermission) {
+      requestPermission();
+    }
+  }, [hasPermission, requestPermission]);
+
+  // Auto-convert when location changes
+  useEffect(() => {
+    if (currentLocation && hasPermission) {
+      performConversion();
+    }
+  }, [currentLocation, selectedLevel]);
+
+  const performConversion = async () => {
+    if (!currentLocation) return;
+
+    setIsConverting(true);
+
+    try {
+      // Convert coordinates
+      const sirgas = convertWGS84ToSIRGASAlbers(
+        currentLocation.longitude,
+        currentLocation.latitude
+      );
+
+      // Get tile ID
+      const tileId = getTileIdFromCoordinates(
+        sirgas.easting,
+        sirgas.northing,
+        selectedLevel
+      );
+
+      // Get tile size
+      const tileSize = getTileSizeFromLevel(selectedLevel);
+
+      const result: ConversionResult = {
+        gps: currentLocation,
+        sirgas,
+        tileId,
+        level: selectedLevel,
+        tileSize,
+        timestamp: Date.now(),
+      };
+
+      setConversionResult(result);
+
+      // Save to history
+      const storedQuery: StoredQuery = {
+        id: `${Date.now()}_${tileId}`,
+        ...result,
+        accuracy: currentLocation.accuracy,
+        locationName: `Lat: ${currentLocation.latitude.toFixed(6)}, Lon: ${currentLocation.longitude.toFixed(6)}`,
+      };
+
+      await saveQuery(storedQuery);
+      setIsFetchingAddress(true);
+      try {
+        const foundAddress = await getAddressFromCoordinates(
+          currentLocation.latitude,
+          currentLocation.longitude
+        );
+        setAddress(foundAddress);
+      } finally {
+        setIsFetchingAddress(false);
+      }
+    } catch (error) {
+      console.error('Conversion error:', error);
+      Alert.alert('Erro', 'Falha ao converter coordenadas. Tente novamente.');
+    } finally {
+      setIsConverting(false);
+    }
+  };
+
+  const handleGetLocation = async () => {
+    if (!hasPermission) {
+      const granted = await requestPermission();
+      if (!granted) return;
+    }
+    await getCurrentLocation();
+  };
+
+  const handleToggleTracking = () => {
+    if (isWatching) {
+      stopWatching();
+    } else {
+      startWatching();
+    }
+  };
+
+  const handleLevelChange = async (value: number) => {
+    await setSelectedLevel(Math.round(value));
+  };
+
+  const formatCoordinate = (value: number, decimals = 6) => {
+    return value.toFixed(decimals);
+  };
+
+  const formatDistance = (meters: number): string => {
+    if (meters >= 1000) {
+      return `${(meters / 1000).toFixed(1)} km`;
+    }
+    return `${meters.toFixed(0)} m`;
+  };
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          {/* Header */}
+          <View style={styles.header}>
+            <Text style={[styles.title, { color: theme.text }]}>Labubu Inc</Text>
+            <Text style={[styles.subtitle, { color: theme.secondary }]}>Converte coordenadas GPS para tiles SIRGAS</Text>
+          </View>
+
+          {/* Theme Toggle removido - usando botão flutuante global */}
+
+          {/* Permission Request */}
+          {!hasPermission && (
+            <View style={[styles.permissionCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <MaterialIcons name="location-off" size={48} color={theme.warning} />
+              <Text style={[styles.permissionTitle, { color: theme.text }]}>Permissão de Localização Necessária</Text>
+              <Text style={[styles.permissionText, { color: theme.secondary }]}>
+                Este app precisa acessar sua localização para realizar a conversão de coordenadas GPS.
+              </Text>
+              <TouchableOpacity style={[styles.permissionButton, { backgroundColor: theme.primary }]} onPress={requestPermission}>
+                <Text style={styles.permissionButtonText}>Conceder Permissão</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Location Controls */}
+          {hasPermission && (
+            <View style={[styles.controlsCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>Controles de Localização</Text>
+
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.controlButton,
+                    { backgroundColor: theme.primary },
+                    locationLoading && { backgroundColor: theme.secondary, opacity: 0.7 }
+                  ]}
+                  onPress={handleGetLocation}
+                  disabled={locationLoading}
+                >
+                  {locationLoading ? (
+                    <ActivityIndicator color="white" size="small" />
+                  ) : (
+                    <MaterialIcons name="my-location" size={24} color="white" />
+                  )}
+                  <Text style={styles.controlButtonText} numberOfLines={1} adjustsFontSizeToFit>
+                    {locationLoading ? 'Obtendo...' : 'Localizar'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.controlButton,
+                    { backgroundColor: isWatching ? theme.error : theme.success }
+                  ]}
+                  onPress={handleToggleTracking}
+                >
+                  <MaterialIcons
+                    name={isWatching ? "location-off" : "location-on"}
+                    size={24}
+                    color="white"
+                  />
+                  <Text style={styles.controlButtonText} numberOfLines={1} adjustsFontSizeToFit>
+                    {isWatching ? 'Parar' : 'Rastrear'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {locationError && (
+                <View style={[styles.errorContainer, { backgroundColor: '#fef2f2', borderColor: theme.error }]}>
+                  <MaterialIcons name="error" size={20} color={theme.error} />
+                  <Text style={[styles.errorText, { color: theme.error }]}>{locationError}</Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Tile Level Selector */}
+          <View style={[styles.levelCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Nível do Tile: {selectedLevel}</Text>
+            <Text style={[styles.levelDescription, { color: theme.secondary }]}>
+              Tamanho do tile: {formatDistance(getTileSizeFromLevel(selectedLevel))}
+            </Text>
+
+            <View style={styles.levelButtonsContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.levelButton,
+                  { backgroundColor: selectedLevel === 0 ? theme.secondary : theme.primary },
+                  selectedLevel === 0 && styles.disabledButton
+                ]}
+                onPress={() => handleLevelChange(Math.max(0, selectedLevel - 1))}
+                disabled={selectedLevel === 0}
+              >
+                <MaterialIcons name="remove" size={24} color="white" />
+              </TouchableOpacity>
+
+              <View style={[styles.levelDisplay, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <Text style={[styles.levelDisplayText, { color: theme.primary }]}>{selectedLevel}</Text>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.levelButton,
+                  { backgroundColor: selectedLevel === 17 ? theme.secondary : theme.primary },
+                  selectedLevel === 17 && styles.disabledButton
+                ]}
+                onPress={() => handleLevelChange(Math.min(17, selectedLevel + 1))}
+                disabled={selectedLevel === 17}
+              >
+                <MaterialIcons name="add" size={24} color="white" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.presetLevels}>
+              {[0, 5, 10, 15, 17].map(level => (
+                <TouchableOpacity
+                  key={level}
+                  style={[
+                    styles.presetButton,
+                    {
+                      backgroundColor: selectedLevel === level ? theme.primary : theme.surface,
+                      borderColor: selectedLevel === level ? theme.primary : theme.border,
+                    }
+                  ]}
+                  onPress={() => handleLevelChange(level)}
+                >
+                  <Text style={[
+                    styles.presetButtonText,
+                    {
+                      color: selectedLevel === level ? 'white' : theme.secondary,
+                    }
+                  ]}>
+                    {level}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[styles.levelHint, { color: theme.secondary }]}>
+              Nível 0: 100km • Nível 17: 1m
+            </Text>
+          </View>
+
+          {/* Conversion Results */}
+          {conversionResult && (
+            <View style={[styles.resultsCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>Resultados da Conversão</Text>
+
+              {isConverting && (
+                <View style={[styles.loadingOverlay, { backgroundColor: theme.background + '90' }]}>
+                  <ActivityIndicator color={theme.primary} size="large" />
+                  <Text style={[styles.loadingText, { color: theme.primary }]}>Convertendo coordenadas...</Text>
+                </View>
+              )}
+
+              {/* GPS Coordinates */}
+              <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
+                <Text style={[styles.coordinateTitle, { color: theme.text }]}>
+                  <MaterialIcons name="gps-fixed" size={16} color={theme.primary} />
+                  {' '}Coordenadas GPS (WGS84)
+                </Text>
+                <View style={styles.coordinateRow}>
+                  <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Latitude:</Text>
+                  <Text style={[styles.coordinateValue, { color: theme.text }]}>
+                    {formatCoordinate(conversionResult.gps.latitude)}°
+                  </Text>
+                </View>
+                <View style={styles.coordinateRow}>
+                  <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Longitude:</Text>
+                  <Text style={[styles.coordinateValue, { color: theme.text }]}>
+                    {formatCoordinate(conversionResult.gps.longitude)}°
+                  </Text>
+                </View>
+                {conversionResult.gps.accuracy && (
+                  <View style={styles.coordinateRow}>
+                    <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Precisão:</Text>
+                    <Text style={[styles.coordinateValue, { color: theme.text }]}>
+                      ±{formatDistance(conversionResult.gps.accuracy)}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* SIRGAS Coordinates */}
+              <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
+                <Text style={[styles.coordinateTitle, { color: theme.text }]}>
+                  <MaterialIcons name="straighten" size={16} color={theme.secondary} />
+                  {' '}SIRGAS 2000 / Brazil Albers
+                </Text>
+                <View style={styles.coordinateRow}>
+                  <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Easting (X):</Text>
+                  <Text style={[styles.coordinateValue, { color: theme.text }]}>
+                    {formatCoordinate(conversionResult.sirgas.easting, 2)} m
+                  </Text>
+                </View>
+                <View style={styles.coordinateRow}>
+                  <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Northing (Y):</Text>
+                  <Text style={[styles.coordinateValue, { color: theme.text }]}>
+                    {formatCoordinate(conversionResult.sirgas.northing, 2)} m
+                  </Text>
+                </View>
+              </View>
+
+              {/* Tile Information */}
+              <View style={styles.tileSection}>
+                <Text style={[styles.tileTitle, { color: theme.text }]}>
+                  <MaterialIcons name="grid-on" size={16} color={theme.success} />
+                  {' '}Informações do Tile
+                </Text>
+                <View style={styles.tileInfoContainer}>
+                  <View style={[styles.tileIdContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                    <Text style={[styles.tileIdLabel, { color: theme.secondary }]}>ID do Tile:</Text>
+                    <Text style={[styles.tileIdValue, { color: theme.primary }]}>{conversionResult.tileId}</Text>
+                  </View>
+                  <View style={styles.tileRow}>
+                    <Text style={[styles.tileLabel, { color: theme.secondary }]}>Nível:</Text>
+                    <Text style={[styles.tileValue, { color: theme.text }]}>{conversionResult.level}</Text>
+                  </View>
+                  <View style={styles.tileRow}>
+                    <Text style={[styles.tileLabel, { color: theme.secondary }]}>Tamanho:</Text>
+                    <Text style={[styles.tileValue, { color: theme.text }]}>
+                      {formatDistance(conversionResult.tileSize)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              {/* Endereço Estimado */}
+              {(isFetchingAddress || address) && (
+                <View style={[styles.addressSection, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                  <Text style={[styles.coordinateTitle, { color: theme.text }]}>
+                    <MaterialIcons name="place" size={16} color={theme.primary} />{' '}
+                    Endereço Estimado
+                  </Text>
+                  {isFetchingAddress ? (
+                    <ActivityIndicator size="small" color={theme.primary} style={{ marginVertical: 8 }} />
+                  ) : (
+                    <Text style={[styles.addressText, { color: theme.secondary }]}>{address}</Text>
+                  )}
+                </View>
+              )}
+              {/* Timestamp */}
+              <View style={[styles.timestampContainer, { borderTopColor: theme.border }]}>
+                <Ionicons name="time-outline" size={14} color={theme.secondary} />
+                <Text style={[styles.timestampText, { color: theme.secondary }]}>
+                  {format(new Date(conversionResult.timestamp), 'dd/MM/yyyy HH:mm:ss')}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Status Indicator */}
+          {currentLocation && (
+            <View style={[styles.statusContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <View style={[styles.statusIndicator, { backgroundColor: theme.success }]} />
+              <Text style={[styles.statusText, { color: theme.secondary }]}>
+                Localização ativa • {isWatching ? 'Rastreando' : 'Estático'}
+              </Text>
+            </View>
+          )}
+
+          {storageError && (
+            <View style={[styles.errorContainer, { backgroundColor: '#fef2f2', borderColor: theme.error }]}>
+              <MaterialIcons name="error" size={20} color={theme.error} />
+              <Text style={[styles.errorText, { color: theme.error }]}>{storageError}</Text>
+            </View>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+// dentro do seu ConverterScreen, troque apenas os styles abaixo
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  subtitle: {
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  addressSection: {
+    marginTop: 8,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  addressText: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  permissionCard: {
+    marginHorizontal: 20,
+    marginVertical: 10,
+    padding: 24,
+    borderRadius: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  permissionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  permissionText: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  permissionButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 24,
+    minWidth: 140,
+    alignItems: 'center',
+  },
+  permissionButtonText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  controlsCard: {
+    marginHorizontal: 20,
+    marginTop: 10,
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 16,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  controlButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 24,
+    gap: 8,
+    minHeight: 48,
+  },
+  controlButtonText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  levelCard: {
+    marginHorizontal: 20,
+    marginTop: 10,
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  levelDescription: {
+    fontSize: 13,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  levelButtonsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    gap: 16,
+  },
+  levelButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  levelDisplay: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 2,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  levelDisplayText: {
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  presetLevels: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  presetButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    minWidth: 34,
+    alignItems: 'center',
+  },
+  presetButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  levelHint: {
+    fontSize: 11,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  resultsCard: {
+    marginHorizontal: 20,
+    marginTop: 10,
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    position: 'relative',
+    gap: 12,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  coordinateSection: {
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 12,
+  },
+  coordinateTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  coordinateRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  coordinateLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  coordinateValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  tileSection: {
+    padding: 14,
+    borderRadius: 12,
+  },
+  tileTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  tileInfoContainer: {
+    gap: 6,
+  },
+  tileIdContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  tileIdLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  tileIdValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  tileRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  tileLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  tileValue: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  timestampContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 6,
+    paddingTop: 10,
+    borderTopWidth: 1,
+  },
+  timestampText: {
+    fontSize: 11,
+    fontStyle: 'italic',
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 20,
+    marginVertical: 20,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 8,
+  },
+  statusIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+});

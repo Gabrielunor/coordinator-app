@@ -122,6 +122,8 @@ export default function SettingsScreen() {
         style={[styles.scrollView, { opacity: fadeAnim }]}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={showDevMode}
+        bounces={showDevMode}
       >
         {/* Header */}
         <View style={styles.header}>

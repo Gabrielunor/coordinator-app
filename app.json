@@ -27,11 +27,16 @@
         "ACCESS_NETWORK_STATE"
       ],
       "softwareKeyboardLayoutMode": "pan",
-      "package": "com.gabrielunor.frontend"
+      "package": "com.gabrielunor.frontend",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDqY01_e4XLEiMxGDcJ8B0Zf_E4tMDKBPk"
+        }
+      }
     },
     "androidStatusBar": {
       "translucent": true,
-      "backgroundColor": "#000000"
+      "backgroundColor": "#e0e0e0"
     },
     "web": {
       "bundler": "metro",
@@ -62,8 +67,7 @@
         {
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#e0e0e0"
         }
       ]
     ],

@@ -93,7 +93,6 @@ export default function MapScreen() {
           );
         }
       } else {
-        // Full calculation from GPS coordinates
         grid36Result = encodeToGrid36(
           currentLocation.longitude,
           currentLocation.latitude,

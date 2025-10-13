@@ -19,8 +19,7 @@ import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 
 import { useLocation } from '@/hooks/useLocation';
 import { useStorage } from '@/hooks/useStorage';
-import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel } from '@/utils/coordinateConversion';
-import { getTileIdFromCoordinates } from '@/utils/hilbertCurve';
+import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel, encodeToGrid36 } from '@/utils/coordinateConversion';
 import { useTheme } from '@/contexts/ThemeContext';
 import { StoredQuery, ConversionResult } from '@/types';
 import { format } from 'date-fns';
@@ -107,28 +106,22 @@ export default function ConverterScreen() {
     setIsConverting(true);
 
     try {
-      // Convert coordinates
-      const sirgas = convertWGS84ToSIRGASAlbers(
+      // Convert coordinates and get Grid36 encoding
+      const grid36Result = encodeToGrid36(
         currentLocation.longitude,
-        currentLocation.latitude
-      );
-
-      // Get tile ID
-      const tileId = getTileIdFromCoordinates(
-        sirgas.easting,
-        sirgas.northing,
+        currentLocation.latitude,
         selectedLevel
       );
 
-      // Get tile size
-      const tileSize = getTileSizeFromLevel(selectedLevel);
-
       const result: ConversionResult = {
         gps: currentLocation,
-        sirgas,
-        tileId,
+        sirgas: {
+          easting: grid36Result.centroid.x,
+          northing: grid36Result.centroid.y
+        },
+        tileId: grid36Result.hash,
         level: selectedLevel,
-        tileSize,
+        tileSize: grid36Result.tileSize,
         timestamp: Date.now(),
       };
 
@@ -136,7 +129,7 @@ export default function ConverterScreen() {
 
       // Save to history
       const storedQuery: StoredQuery = {
-        id: `${Date.now()}_${tileId}`,
+        id: `${Date.now()}_${result.tileId}`,
         ...result,
         accuracy: currentLocation.accuracy,
         locationName: `Lat: ${currentLocation.latitude.toFixed(6)}, Lon: ${currentLocation.longitude.toFixed(6)}`,
@@ -178,7 +171,9 @@ export default function ConverterScreen() {
   };
 
   const handleLevelChange = async (value: number) => {
-    await setSelectedLevel(Math.round(value));
+    // Grid36 uses depth 1-9 instead of level 0-17
+    const depth = Math.max(1, Math.min(9, Math.round(value)));
+    await setSelectedLevel(depth);
   };
 
   const formatCoordinate = (value: number, decimals = 6) => {
@@ -275,7 +270,7 @@ export default function ConverterScreen() {
 
           {/* Tile Level Selector */}
           <View style={[styles.levelCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>Nível do Tile: {selectedLevel}</Text>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Profundidade do Tile: {selectedLevel}</Text>
             <Text style={[styles.levelDescription, { color: theme.secondary }]}>
               Tamanho do tile: {formatDistance(getTileSizeFromLevel(selectedLevel))}
             </Text>
@@ -284,11 +279,11 @@ export default function ConverterScreen() {
               <TouchableOpacity
                 style={[
                   styles.levelButton,
-                  { backgroundColor: selectedLevel === 0 ? theme.secondary : theme.primary },
-                  selectedLevel === 0 && styles.disabledButton
+                  { backgroundColor: selectedLevel === 1 ? theme.secondary : theme.primary },
+                  selectedLevel === 1 && styles.disabledButton
                 ]}
-                onPress={() => handleLevelChange(Math.max(0, selectedLevel - 1))}
-                disabled={selectedLevel === 0}
+                onPress={() => handleLevelChange(Math.max(1, selectedLevel - 1))}
+                disabled={selectedLevel === 1}
               >
                 <MaterialIcons name="remove" size={24} color="white" />
               </TouchableOpacity>
@@ -300,18 +295,18 @@ export default function ConverterScreen() {
               <TouchableOpacity
                 style={[
                   styles.levelButton,
-                  { backgroundColor: selectedLevel === 17 ? theme.secondary : theme.primary },
-                  selectedLevel === 17 && styles.disabledButton
+                  { backgroundColor: selectedLevel === 9 ? theme.secondary : theme.primary },
+                  selectedLevel === 9 && styles.disabledButton
                 ]}
-                onPress={() => handleLevelChange(Math.min(17, selectedLevel + 1))}
-                disabled={selectedLevel === 17}
+                onPress={() => handleLevelChange(Math.min(9, selectedLevel + 1))}
+                disabled={selectedLevel === 9}
               >
                 <MaterialIcons name="add" size={24} color="white" />
               </TouchableOpacity>
             </View>
 
             <View style={styles.presetLevels}>
-              {[0, 5, 10, 15, 17].map(level => (
+              {[1, 3, 5, 7, 9].map(level => (
                 <TouchableOpacity
                   key={level}
                   style={[
@@ -336,7 +331,7 @@ export default function ConverterScreen() {
             </View>
 
             <Text style={[styles.levelHint, { color: theme.secondary }]}>
-              Nível 0: 100km • Nível 17: 1m
+              Depth 1: ~1600km • Depth 9: ~1m
             </Text>
           </View>
 
@@ -354,10 +349,10 @@ export default function ConverterScreen() {
 
               {/* GPS Coordinates */}
               <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
-                <Text style={[styles.coordinateTitle, { color: theme.text }]}>
+                <View style={styles.tileTitleContainer}>
                   <MaterialIcons name="gps-fixed" size={16} color={theme.primary} />
-                  {' '}Coordenadas GPS (WGS84)
-                </Text>
+                  <Text style={[styles.coordinateTitle, { color: theme.text }]}>Coordenadas GPS (WGS84)</Text>
+                </View>
                 <View style={styles.coordinateRow}>
                   <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Latitude:</Text>
                   <Text style={[styles.coordinateValue, { color: theme.text }]}>
@@ -382,10 +377,10 @@ export default function ConverterScreen() {
 
               {/* SIRGAS Coordinates */}
               <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
-                <Text style={[styles.coordinateTitle, { color: theme.text }]}>
+                <View style={styles.tileTitleContainer}>
                   <MaterialIcons name="straighten" size={16} color={theme.secondary} />
-                  {' '}SIRGAS 2000 / Brazil Albers
-                </Text>
+                  <Text style={[styles.coordinateTitle, { color: theme.text }]}>SIRGAS 2000 / Brazil Albers</Text>
+                </View>
                 <View style={styles.coordinateRow}>
                   <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Easting (X):</Text>
                   <Text style={[styles.coordinateValue, { color: theme.text }]}>
@@ -402,10 +397,10 @@ export default function ConverterScreen() {
 
               {/* Tile Information */}
               <View style={styles.tileSection}>
-                <Text style={[styles.tileTitle, { color: theme.text }]}>
+                <View style={styles.tileTitleContainer}>
                   <MaterialIcons name="grid-on" size={16} color={theme.success} />
-                  {' '}Informações do Tile
-                </Text>
+                  <Text style={[styles.tileTitle, { color: theme.text }]}>Informações do Tile</Text>
+                </View>
                 <View style={styles.tileInfoContainer}>
                   <View style={[styles.tileIdContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
                     <Text style={[styles.tileIdLabel, { color: theme.secondary }]}>ID do Tile:</Text>
@@ -426,10 +421,12 @@ export default function ConverterScreen() {
               {/* Endereço Estimado */}
               {(isFetchingAddress || address) && (
                 <View style={[styles.addressSection, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                  <Text style={[styles.coordinateTitle, { color: theme.text }]}>
-                    <MaterialIcons name="place" size={16} color={theme.primary} />{' '}
-                    Endereço Estimado
-                  </Text>
+                  <View style={styles.tileTitleContainer}>
+                    <MaterialIcons name="place" size={16} color={theme.primary} />
+                    <Text style={[styles.coordinateTitle, { color: theme.text }]}>
+                      Endereço Estimado
+                    </Text>
+                  </View>
                   {isFetchingAddress ? (
                     <ActivityIndicator size="small" color={theme.primary} style={{ marginVertical: 8 }} />
                   ) : (
@@ -687,6 +684,11 @@ const styles = StyleSheet.create({
   tileTitle: {
     fontSize: 15,
     fontWeight: '600',
+    marginLeft: 6,
+  },
+  tileTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 10,
   },
   tileInfoContainer: {

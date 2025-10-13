@@ -31,7 +31,7 @@ export default function SearchScreen() {
   const { saveQuery } = useStorage();
 
   const [searchTileId, setSearchTileId] = useState('');
-  const [searchLevel, setSearchLevel] = useState(10);
+  const [searchLevel, setSearchLevel] = useState(5); // Grid36 uses depth 1-9
   const [searchResult, setSearchResult] = useState<TileSearchResult | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -43,7 +43,7 @@ export default function SearchScreen() {
     }
 
     if (!isValidTileId(searchTileId.trim())) {
-      Alert.alert('Erro', 'ID de tile inválido. Use apenas números e letras (0-9, A-Z)');
+      Alert.alert('Erro', 'ID de tile inválido. Use apenas caracteres do Grid36 (ex: Z, G, H, I, J, K, Y, F, 4, 5, 6, L, etc.)');
       return;
     }
 
@@ -78,7 +78,7 @@ export default function SearchScreen() {
           northing: searchResult.sirgas.centerNorthing,
         },
         tileId: searchResult.tileId,
-        level: searchResult.level,
+        level: searchResult.depth, // Use depth instead of level
         tileSize: searchResult.tileSize,
         timestamp: Date.now(),
         locationName: `Busca: ${searchResult.tileId}`,
@@ -92,7 +92,8 @@ export default function SearchScreen() {
   };
 
   const handleLevelChange = (newLevel: number) => {
-    if (newLevel >= 0 && newLevel <= 17) {
+    // Grid36 uses depth 1-9
+    if (newLevel >= 1 && newLevel <= 9) {
       setSearchLevel(newLevel);
       // Se já temos um resultado, refaz a busca com o novo nível
       if (searchResult && !isSearching) {
@@ -116,92 +117,92 @@ export default function SearchScreen() {
     <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
       <Text style={[styles.cardTitle, { color: theme.text }]}>Buscar por ID do Tile</Text>
 
-      {/* Input do ID */}
-      <View style={styles.inputContainer}>
-        <Text style={[styles.inputLabel, { color: theme.secondary }]}>ID do Tile</Text>
-        <TextInput
-          style={[
-            styles.textInput,
-            {
-              backgroundColor: theme.surface,
-              borderColor: theme.border,
-              color: theme.text,
-            }
-          ]}
-          value={searchTileId}
-          onChangeText={setSearchTileId}
-          placeholder="Digite o ID do tile (ex: 1A2B3C)"
-          placeholderTextColor={theme.secondary}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          maxLength={20}
-        />
-      </View>
-
-      {/* Seletor de Nível */}
-      <View style={styles.inputContainer}>
-        <Text style={[styles.inputLabel, { color: theme.secondary }]}>
-          Nível: {searchLevel} (Tamanho: {formatDistance(getTileSizeFromLevel(searchLevel))})
-        </Text>
-
-        <View style={styles.levelButtonsContainer}>
-          <TouchableOpacity
+        {/* Input do ID */}
+        <View style={styles.inputContainer}>
+          <Text style={[styles.inputLabel, { color: theme.secondary }]}>ID do Tile (Grid36)</Text>
+          <TextInput
             style={[
-              styles.levelButton,
-              { backgroundColor: searchLevel === 0 ? theme.secondary : theme.primary },
-              searchLevel === 0 && styles.disabledButton
+              styles.textInput,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+                color: theme.text,
+              }
             ]}
-            onPress={() => handleLevelChange(searchLevel - 1)}
-            disabled={searchLevel === 0}
-          >
-            <MaterialIcons name="remove" size={20} color="white" />
-          </TouchableOpacity>
+            value={searchTileId}
+            onChangeText={setSearchTileId}
+            placeholder="Digite o ID Grid36 (ex: ZGHIJK)"
+            placeholderTextColor={theme.secondary}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={9}
+          />
+        </View>
 
-          <View style={[styles.levelDisplay, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <Text style={[styles.levelDisplayText, { color: theme.primary }]}>{searchLevel}</Text>
+        {/* Seletor de Profundidade */}
+        <View style={styles.inputContainer}>
+          <Text style={[styles.inputLabel, { color: theme.secondary }]}>
+            Profundidade: {searchLevel} (Tamanho: {formatDistance(getTileSizeFromLevel(searchLevel))})
+          </Text>
+
+          <View style={styles.levelButtonsContainer}>
+            <TouchableOpacity
+              style={[
+                styles.levelButton,
+                { backgroundColor: searchLevel === 1 ? theme.secondary : theme.primary },
+                searchLevel === 1 && styles.disabledButton
+              ]}
+              onPress={() => handleLevelChange(searchLevel - 1)}
+              disabled={searchLevel === 1}
+            >
+              <MaterialIcons name="remove" size={20} color="white" />
+            </TouchableOpacity>
+
+            <View style={[styles.levelDisplay, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <Text style={[styles.levelDisplayText, { color: theme.primary }]}>{searchLevel}</Text>
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.levelButton,
+                { backgroundColor: searchLevel === 9 ? theme.secondary : theme.primary },
+                searchLevel === 9 && styles.disabledButton
+              ]}
+              onPress={() => handleLevelChange(searchLevel + 1)}
+              disabled={searchLevel === 9}
+            >
+              <MaterialIcons name="add" size={20} color="white" />
+            </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
-            style={[
-              styles.levelButton,
-              { backgroundColor: searchLevel === 17 ? theme.secondary : theme.primary },
-              searchLevel === 17 && styles.disabledButton
-            ]}
-            onPress={() => handleLevelChange(searchLevel + 1)}
-            disabled={searchLevel === 17}
-          >
-            <MaterialIcons name="add" size={20} color="white" />
-          </TouchableOpacity>
+          <View style={styles.presetLevels}>
+            {[1, 3, 5, 7, 9].map(level => (
+              <TouchableOpacity
+                key={level}
+                style={[
+                  styles.presetButton,
+                  {
+                    backgroundColor: searchLevel === level ? theme.primary : theme.surface,
+                    borderColor: searchLevel === level ? theme.primary : theme.border,
+                  }
+                ]}
+                onPress={() => handleLevelChange(level)}
+              >
+                <Text style={[
+                  styles.presetButtonText,
+                  {
+                    color: searchLevel === level ? 'white' : theme.secondary,
+                  }
+                ]}>
+                  {level}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
-        <View style={styles.presetLevels}>
-          {[0, 5, 10, 15, 17].map(level => (
-            <TouchableOpacity
-              key={level}
-              style={[
-                styles.presetButton,
-                {
-                  backgroundColor: searchLevel === level ? theme.primary : theme.surface,
-                  borderColor: searchLevel === level ? theme.primary : theme.border,
-                }
-              ]}
-              onPress={() => handleLevelChange(level)}
-            >
-              <Text style={[
-                styles.presetButtonText,
-                {
-                  color: searchLevel === level ? 'white' : theme.secondary,
-                }
-              ]}>
-                {level}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      {/* Botão de Busca */}
-      <TouchableOpacity
+        {/* Botão de Busca */}
+        <TouchableOpacity
         style={[
           styles.searchButton,
           { backgroundColor: theme.primary },
@@ -249,11 +250,11 @@ export default function SearchScreen() {
         <View style={styles.resultHeader}>
           <Text style={[styles.cardTitle, { color: theme.text }]}>Resultado da Busca</Text>
 
-          {/* Badge de Nível */}
+          {/* Badge de Profundidade */}
           <View style={[styles.levelBadge, { backgroundColor: theme.primary + '22' }]}>
             <MaterialIcons name="layers" size={14} color={theme.primary} />
             <Text style={[styles.levelBadgeText, { color: theme.primary }]}>
-              Nível {searchResult.level} • {formatDistance(searchResult.tileSize)}
+              Profundidade {searchResult.depth} • {formatDistance(searchResult.tileSize)}
             </Text>
           </View>
 
@@ -273,9 +274,10 @@ export default function SearchScreen() {
 
         {/* Centro GPS */}
         <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
-          <Text style={[styles.sectionLabel, { color: theme.secondary }]}>
-            <MaterialIcons name="gps-fixed" size={16} color={theme.primary} /> Centro (WGS84)
-          </Text>
+          <View style={styles.tileTitleContainer}>
+            <MaterialIcons name="gps-fixed" size={16} color={theme.primary} />
+            <Text style={[styles.sectionLabel, { color: theme.secondary }]}>Centro (WGS84)</Text>
+          </View>
           <View style={styles.coordinateRow}>
             <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Latitude:</Text>
             <Text style={[styles.coordinateValue, { color: theme.text }]}>
@@ -292,9 +294,10 @@ export default function SearchScreen() {
 
         {/* Centro SIRGAS */}
         <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
-          <Text style={[styles.sectionLabel, { color: theme.secondary }]}>
-            <MaterialIcons name="straighten" size={16} color={theme.secondary} /> Centro (SIRGAS Albers)
-          </Text>
+          <View style={styles.tileTitleContainer}>
+            <MaterialIcons name="straighten" size={16} color={theme.secondary} />
+            <Text style={[styles.sectionLabel, { color: theme.secondary }]}>Centro (SIRGAS Albers)</Text>
+          </View>
           <View style={styles.coordinateRow}>
             <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Easting (X):</Text>
             <Text style={[styles.coordinateValue, { color: theme.text }]}>
@@ -311,9 +314,10 @@ export default function SearchScreen() {
 
         {/* Limites */}
         <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
-          <Text style={[styles.sectionLabel, { color: theme.secondary }]}>
-            <MaterialIcons name="crop-free" size={16} color={theme.success} /> Limites (SIRGAS Albers)
-          </Text>
+          <View style={styles.tileTitleContainer}>
+            <MaterialIcons name="crop-free" size={16} color={theme.success} />
+            <Text style={[styles.sectionLabel, { color: theme.secondary }]}>Limites (SIRGAS Albers)</Text>
+          </View>
           {[
             ['Min Easting', searchResult.bounds.minEasting],
             ['Max Easting', searchResult.bounds.maxEasting],
@@ -568,9 +572,14 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 12,
+    marginLeft: 6,
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  tileTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   coordinateRow: {
     flexDirection: 'row',

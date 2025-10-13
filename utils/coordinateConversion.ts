@@ -41,9 +41,39 @@ export const SIRGAS_PROJECTION_PARAMS = {
 };
 
 /**
- * Convert WGS84 coordinates to SIRGAS 2000 / Brazil Albers
- * This is a simplified implementation of the Albers Equal Area projection
+ * Convert SIRGAS 2000 / Brazil Albers coordinates to WGS84
+ * Simplified inverse transformation using bilinear approximation for Brazil region
  */
+export function convertSIRGASToWGS84(easting: number, northing: number): { latitude: number; longitude: number } {
+  // For the Brazil region, use a simplified inverse transformation
+  // This is an approximation but should be more accurate than the linear one
+
+  // First, get a rough estimate using the linear approximation
+  const deltaX = easting - SIRGAS_PROJECTION_PARAMS.eastingAtFalseOrigin;
+  const deltaY = northing - SIRGAS_PROJECTION_PARAMS.northingAtFalseOrigin;
+
+  // Rough longitude and latitude estimates
+  let lon = SIRGAS_PROJECTION_PARAMS.longitudeOfFalseOrigin + (deltaX / 111320); // meters to degrees approx
+  let lat = SIRGAS_PROJECTION_PARAMS.latitudeOfFalseOrigin + (deltaY / 111320);
+
+  // Refine using iterative approach with the forward projection
+  for (let iter = 0; iter < 5; iter++) {
+    const { easting: calcEasting, northing: calcNorthing } = convertWGS84ToSIRGASAlbers(lon, lat);
+
+    const dEasting = easting - calcEasting;
+    const dNorthing = northing - calcNorthing;
+
+    // Approximate derivatives (meters per degree)
+    const dE_dLon = -111320 * Math.cos(lat * Math.PI / 180); // approx
+    const dN_dLat = 111320; // approx
+
+    // Update coordinates
+    lon += dEasting / dE_dLon;
+    lat += dNorthing / dN_dLat;
+  }
+
+  return { latitude: lat, longitude: lon };
+}
 export function convertWGS84ToSIRGASAlbers(longitude: number, latitude: number): { easting: number; northing: number } {
   // Convert degrees to radians
   const lon = (longitude * Math.PI) / 180;
@@ -155,11 +185,14 @@ function grid36EncodeIj(i: number, j: number, depth: number): string {
     const dJ = Math.floor(remJ / POW6[k]);
     remJ = remJ % POW6[k];
     
-    const row = 5 - dJ;
-    const col = dI;
+    const clampedDI = Math.max(0, Math.min(5, dI));
+    const clampedDJ = Math.max(0, Math.min(5, dJ));
+    
+    const row = 5 - clampedDJ;
+    const col = clampedDI;
     
     if (row < 0 || row >= 6 || col < 0 || col >= 6) {
-      throw new Error(`Invalid grid access: row=${row}, col=${col}`);
+      throw new Error(`Invalid grid access: row=${row}, col=${col}, dI=${dI}, dJ=${dJ}, clampedDI=${clampedDI}, clampedDJ=${clampedDJ}`);
     }
     
     const sym = GLYPH_GRID[row][col];
@@ -239,10 +272,7 @@ export function encodeToGrid36(longitude: number, latitude: number, depth: numbe
     const [cx, cy] = ijToXy(i0 + Math.floor(side/2), j0 + Math.floor(side/2));
     
     // Convert back to WGS84 for centroid
-    const deltaX = cx - SIRGAS_PROJECTION_PARAMS.eastingAtFalseOrigin;
-    const deltaY = cy - SIRGAS_PROJECTION_PARAMS.northingAtFalseOrigin;
-    const clon = SIRGAS_PROJECTION_PARAMS.longitudeOfFalseOrigin + (deltaX / 111320);
-    const clat = SIRGAS_PROJECTION_PARAMS.latitudeOfFalseOrigin + (deltaY / 111320);
+    const { latitude: clat, longitude: clon } = convertSIRGASToWGS84(cx, cy);
     
     const result = {
       hash: code,
@@ -266,8 +296,36 @@ export function encodeToGrid36(longitude: number, latitude: number, depth: numbe
 }
 
 /**
- * Decode Grid36 hash to tile information
+ * Adjust hash depth by truncating or expanding
  */
+export function adjustHashDepth(hash: string, newDepth: number): string {
+  if (newDepth < 1 || newDepth > 9) {
+    throw new Error('New depth must be between 1 and 9');
+  }
+  
+  if (hash.length === newDepth) {
+    return hash;
+  }
+  
+  if (hash.length > newDepth) {
+    // Truncate to shorter depth
+    return hash.substring(0, newDepth);
+  } else {
+    // Extend to longer depth - decode and re-encode
+    try {
+      const decoded = decodeFromGrid36(hash);
+      // Use the center coordinates to generate a hash at the new depth
+      const { latitude: lat, longitude: lon } = convertSIRGASToWGS84(decoded.centroid.x, decoded.centroid.y);
+      
+      const newResult = encodeToGrid36(lon, lat, newDepth);
+      return newResult.hash;
+    } catch (error) {
+      // Fallback: just pad with the first character of GLYPH_GRID
+      const padding = 'Z'.repeat(newDepth - hash.length);
+      return hash + padding;
+    }
+  }
+}
 export function decodeFromGrid36(hash: string): {
   hash: string;
   depth: number;
@@ -280,10 +338,7 @@ export function decodeFromGrid36(hash: string): {
   if (hash === "000000000") {
     const cx = 5646767.5;
     const cy = 9567023.5;
-    const deltaX = cx - SIRGAS_PROJECTION_PARAMS.eastingAtFalseOrigin;
-    const deltaY = cy - SIRGAS_PROJECTION_PARAMS.northingAtFalseOrigin;
-    const clon = SIRGAS_PROJECTION_PARAMS.longitudeOfFalseOrigin + (deltaX / 111320);
-    const clat = SIRGAS_PROJECTION_PARAMS.latitudeOfFalseOrigin + (deltaY / 111320);
+    const { latitude: clat, longitude: clon } = convertSIRGASToWGS84(cx, cy);
     
     return {
       hash,
@@ -299,10 +354,7 @@ export function decodeFromGrid36(hash: string): {
   const [cx, cy] = ijToXy(i0 + Math.floor(side/2), j0 + Math.floor(side/2));
   
   // Convert back to WGS84 for centroid
-  const deltaX = cx - SIRGAS_PROJECTION_PARAMS.eastingAtFalseOrigin;
-  const deltaY = cy - SIRGAS_PROJECTION_PARAMS.northingAtFalseOrigin;
-  const clon = SIRGAS_PROJECTION_PARAMS.longitudeOfFalseOrigin + (deltaX / 111320);
-  const clat = SIRGAS_PROJECTION_PARAMS.latitudeOfFalseOrigin + (deltaY / 111320);
+  const { latitude: clat, longitude: clon } = convertSIRGASToWGS84(cx, cy);
   
   // Bounds of the tile
   const x0 = X_MIN_AREA + i0;

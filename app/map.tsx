@@ -21,7 +21,7 @@ import MapView, { Marker } from 'react-native-maps';
 
 import { useLocation } from '@/hooks/useLocation';
 import { useStorage } from '@/hooks/useStorage';
-import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel, encodeToGrid36 } from '@/utils/coordinateConversion';
+import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel, encodeToGrid36, adjustHashDepth, decodeFromGrid36 } from '@/utils/coordinateConversion';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ConversionResult } from '@/types';
 
@@ -68,12 +68,38 @@ export default function MapScreen() {
     setIsConverting(true);
 
     try {
-      // Use Grid36 encoding directly
-      const grid36Result = encodeToGrid36(
-        currentLocation.longitude,
-        currentLocation.latitude,
-        selectedLevel
-      );
+      let grid36Result;
+      
+      if (currentTileInfo && currentTileInfo.gps.latitude === currentLocation.latitude && 
+          currentTileInfo.gps.longitude === currentLocation.longitude) {
+        try {
+          const adjustedHash = adjustHashDepth(currentTileInfo.tileId, selectedLevel);
+          const decoded = decodeFromGrid36(adjustedHash);
+          
+          grid36Result = {
+            hash: adjustedHash,
+            depth: selectedLevel,
+            tileSize: getTileSizeFromLevel(selectedLevel),
+            ijOrigin: decoded.ijOrigin,
+            centroid: decoded.centroid,
+            foraArea: false
+          };
+        } catch (error) {
+          console.warn('Hash adjustment failed in map, falling back to full recalculation:', error);
+          grid36Result = encodeToGrid36(
+            currentLocation.longitude,
+            currentLocation.latitude,
+            selectedLevel
+          );
+        }
+      } else {
+        // Full calculation from GPS coordinates
+        grid36Result = encodeToGrid36(
+          currentLocation.longitude,
+          currentLocation.latitude,
+          selectedLevel
+        );
+      }
 
       const result: ConversionResult = {
         gps: currentLocation,
@@ -93,7 +119,7 @@ export default function MapScreen() {
     } finally {
       setIsConverting(false);
     }
-  }, [currentLocation, selectedLevel]);
+  }, [currentLocation, selectedLevel, currentTileInfo]);
 
   useEffect(() => {
     if (currentLocation) {

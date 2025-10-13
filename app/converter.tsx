@@ -19,7 +19,7 @@ import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 
 import { useLocation } from '@/hooks/useLocation';
 import { useStorage } from '@/hooks/useStorage';
-import { getTileSizeFromLevel, encodeToGrid36 } from '@/utils/coordinateConversion';
+import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel, encodeToGrid36, adjustHashDepth, decodeFromGrid36 } from '@/utils/coordinateConversion';
 import { useTheme } from '@/contexts/ThemeContext';
 import { StoredQuery, ConversionResult } from '@/types';
 import { format } from 'date-fns';
@@ -117,11 +117,10 @@ export default function ConverterScreen() {
 
   // ─── Core Conversion Routine ─────────────────────────────────────────────
   const performConversion = useCallback(
-    async (depthOverride?: number) => {
+    async (depthOverride?: number, forceRecalculate = false) => {
       if (!currentLocation) return;
 
       const depth = depthOverride ?? selectedLevel;
-
       const requestId = ++requestIdRef.current;
 
       setIsConverting(true);
@@ -129,11 +128,40 @@ export default function ConverterScreen() {
       setAddress(null);
 
       try {
-        const grid36Result = encodeToGrid36(
-          currentLocation.longitude,
-          currentLocation.latitude,
-          depth
-        );
+        let grid36Result;
+        
+        // If we have existing conversion result and just changing depth, try to adjust hash
+        if (conversionResult && !forceRecalculate && depthOverride !== undefined) {
+          try {
+            const adjustedHash = adjustHashDepth(conversionResult.tileId, depth);
+            // Verify the adjusted hash is valid by decoding it
+            const decoded = decodeFromGrid36(adjustedHash);
+            
+            grid36Result = {
+              hash: adjustedHash,
+              depth: depth,
+              tileSize: getTileSizeFromLevel(depth),
+              ijOrigin: decoded.ijOrigin,
+              centroid: decoded.centroid,
+              foraArea: false
+            };
+          } catch (error) {
+            // Fallback to full recalculation
+            console.warn('Hash adjustment failed, falling back to full recalculation:', error);
+            grid36Result = encodeToGrid36(
+              currentLocation.longitude,
+              currentLocation.latitude,
+              depth
+            );
+          }
+        } else {
+          // Full calculation from GPS coordinates
+          grid36Result = encodeToGrid36(
+            currentLocation.longitude,
+            currentLocation.latitude,
+            depth
+          );
+        }
 
         const result: ConversionResult = {
           gps: currentLocation,
@@ -143,7 +171,7 @@ export default function ConverterScreen() {
           },
           tileId: grid36Result.hash,
           level: depth,
-          tileSize: getTileSizeFromLevel(depth),
+          tileSize: grid36Result.tileSize,
           timestamp: Date.now(),
         };
 
@@ -315,7 +343,6 @@ export default function ConverterScreen() {
                 style={[
                   styles.levelButton,
                   { backgroundColor: isDecreaseDisabled ? theme.secondary : theme.primary },
-                  isDecreaseDisabled && styles.disabledButton
                 ]}
                 onPress={() => handleLevelChange(selectedLevel - 1)}
                 disabled={isDecreaseDisabled}
@@ -331,7 +358,6 @@ export default function ConverterScreen() {
                 style={[
                   styles.levelButton,
                   { backgroundColor: isIncreaseDisabled ? theme.secondary : theme.primary },
-                  isIncreaseDisabled && styles.disabledButton
                 ]}
                 onPress={() => handleLevelChange(selectedLevel + 1)}
                 disabled={isIncreaseDisabled}

@@ -23,17 +23,13 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useStorage } from '@/hooks/useStorage';
 import { searchTileById, isValidTileId, TileSearchResult } from '@/utils/tileSearch';
-import { getTileSizeFromLevel } from '@/utils/coordinateConversion';
 import { StoredQuery } from '@/types';
-
-const PRESET_LEVELS = [1, 3, 5, 7, 9] as const;
 
 export default function SearchScreen() {
   const { theme } = useTheme();
   const { saveQuery } = useStorage();
 
   const [searchTileId, setSearchTileId] = useState('');
-  const [searchLevel, setSearchLevel] = useState(5); // Grid36 uses depth 1-9
   const [searchResult, setSearchResult] = useState<TileSearchResult | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -71,7 +67,7 @@ export default function SearchScreen() {
     setSearchResult(null);
 
     try {
-      const result = searchTileById(normalizedTileId, searchLevel);
+      const result = searchTileById(normalizedTileId);
       setSearchResult(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao buscar tile';
@@ -89,13 +85,13 @@ export default function SearchScreen() {
       const storedQuery: StoredQuery = {
         id: `search_${Date.now()}_${searchResult.tileId}`,
         gps: {
-          latitude: searchResult.gps.centerLatitude,
-          longitude: searchResult.gps.centerLongitude,
+          latitude: searchResult.gps.latitude,
+          longitude: searchResult.gps.longitude,
           timestamp: Date.now(),
         },
         sirgas: {
-          easting: searchResult.sirgas.centerEasting,
-          northing: searchResult.sirgas.centerNorthing,
+          easting: searchResult.sirgas.easting,
+          northing: searchResult.sirgas.northing,
         },
         tileId: searchResult.tileId,
         level: searchResult.depth, // Use depth instead of level
@@ -109,18 +105,6 @@ export default function SearchScreen() {
     } catch (error) {
       console.error('Falha ao salvar tile pesquisado no histórico', error);
       Alert.alert('Erro', 'Falha ao salvar no histórico');
-    }
-  };
-
-  const handleLevelChange = (newLevel: number) => {
-    // Grid36 uses depth 1-9
-    if (newLevel >= 1 && newLevel <= 9) {
-      setSearchLevel(newLevel);
-      // Se já temos um resultado, refaz a busca com o novo nível
-      if (searchResult && !isSearching) {
-        setSearchResult(null);
-      }
-      setSearchError(null);
     }
   };
 
@@ -168,70 +152,6 @@ export default function SearchScreen() {
           returnKeyType="search"
           onSubmitEditing={handleSearch}
         />
-      </View>
-
-      {/* Seletor de Profundidade */}
-      <View style={styles.inputContainer}>
-        <Text style={[styles.inputLabel, { color: theme.secondary }]}> 
-          Profundidade: {searchLevel} (Tamanho: {formatDistance(getTileSizeFromLevel(searchLevel))})
-        </Text>
-
-        <View style={styles.levelButtonsContainer}>
-          <TouchableOpacity
-            style={[
-              styles.levelButton,
-              { backgroundColor: searchLevel === 1 ? theme.secondary : theme.primary },
-              searchLevel === 1 && styles.disabledButton,
-            ]}
-            onPress={() => handleLevelChange(searchLevel - 1)}
-            disabled={searchLevel === 1}
-          >
-            <MaterialIcons name="remove" size={20} color="white" />
-          </TouchableOpacity>
-
-          <View style={[styles.levelDisplay, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <Text style={[styles.levelDisplayText, { color: theme.primary }]}>{searchLevel}</Text>
-          </View>
-
-          <TouchableOpacity
-            style={[
-              styles.levelButton,
-              { backgroundColor: searchLevel === 9 ? theme.secondary : theme.primary },
-              searchLevel === 9 && styles.disabledButton,
-            ]}
-            onPress={() => handleLevelChange(searchLevel + 1)}
-            disabled={searchLevel === 9}
-          >
-            <MaterialIcons name="add" size={20} color="white" />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.presetLevels}>
-          {PRESET_LEVELS.map(level => (
-            <TouchableOpacity
-              key={level}
-              style={[
-                styles.presetButton,
-                {
-                  backgroundColor: searchLevel === level ? theme.primary : theme.surface,
-                  borderColor: searchLevel === level ? theme.primary : theme.border,
-                },
-              ]}
-              onPress={() => handleLevelChange(level)}
-            >
-              <Text
-                style={[
-                  styles.presetButtonText,
-                  {
-                    color: searchLevel === level ? 'white' : theme.secondary,
-                  },
-                ]}
-              >
-                {level}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
       </View>
 
       {/* Botão de Busca */}
@@ -292,10 +212,30 @@ export default function SearchScreen() {
           <Text style={[styles.tileIdValue, { color: theme.primary }]}>{searchResult.tileId}</Text>
         </View>
 
-        {/* Centro GPS */}
+        {/* Origem GPS */}
         <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
           <View style={styles.tileTitleContainer}>
             <MaterialIcons name="gps-fixed" size={16} color={theme.primary} />
+            <Text style={[styles.sectionLabel, { color: theme.secondary }]}>Origem (WGS84)</Text>
+          </View>
+          <View style={styles.coordinateRow}>
+            <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Latitude:</Text>
+            <Text style={[styles.coordinateValue, { color: theme.text }]}>
+              {formatCoordinate(searchResult.gps.latitude)}°
+            </Text>
+          </View>
+          <View style={styles.coordinateRow}>
+            <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Longitude:</Text>
+            <Text style={[styles.coordinateValue, { color: theme.text }]}>
+              {formatCoordinate(searchResult.gps.longitude)}°
+            </Text>
+          </View>
+        </View>
+
+        {/* Centro GPS */}
+        <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
+          <View style={styles.tileTitleContainer}>
+            <MaterialIcons name="center-focus-strong" size={16} color={theme.primary} />
             <Text style={[styles.sectionLabel, { color: theme.secondary }]}>Centro (WGS84)</Text>
           </View>
           <View style={styles.coordinateRow}>
@@ -312,10 +252,30 @@ export default function SearchScreen() {
           </View>
         </View>
 
-        {/* Centro SIRGAS */}
+        {/* Origem SIRGAS */}
         <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
           <View style={styles.tileTitleContainer}>
             <MaterialIcons name="straighten" size={16} color={theme.secondary} />
+            <Text style={[styles.sectionLabel, { color: theme.secondary }]}>Origem (SIRGAS Albers)</Text>
+          </View>
+          <View style={styles.coordinateRow}>
+            <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Easting (X):</Text>
+            <Text style={[styles.coordinateValue, { color: theme.text }]}>
+              {formatCoordinate(searchResult.sirgas.easting, 2)} m
+            </Text>
+          </View>
+          <View style={styles.coordinateRow}>
+            <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Northing (Y):</Text>
+            <Text style={[styles.coordinateValue, { color: theme.text }]}>
+              {formatCoordinate(searchResult.sirgas.northing, 2)} m
+            </Text>
+          </View>
+        </View>
+
+        {/* Centro SIRGAS */}
+        <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
+          <View style={styles.tileTitleContainer}>
+            <MaterialIcons name="center-focus-strong" size={16} color={theme.secondary} />
             <Text style={[styles.sectionLabel, { color: theme.secondary }]}>Centro (SIRGAS Albers)</Text>
           </View>
           <View style={styles.coordinateRow}>

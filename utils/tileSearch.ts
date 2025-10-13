@@ -3,7 +3,7 @@
  * Funcionalidades para busca reversa de tiles por ID usando Grid36
  */
 
-import { decodeFromGrid36, GLYPH_GRID } from './coordinateConversion';
+import { decodeFromGrid36, GLYPH_GRID, convertSIRGASToWGS84 } from './coordinateConversion';
 
 // Constantes do sistema Grid36
 const MARCO_ZERO_X = 5646767.0;
@@ -40,22 +40,12 @@ export interface TileSearchResult {
 /**
  * Busca informações de um tile pelo seu ID usando Grid36
  */
-export function searchTileById(tileId: string, depth: number): TileSearchResult {
+export function searchTileById(tileId: string): TileSearchResult {
   try {
     // Use the Grid36 decoding system
     const decoded = decodeFromGrid36(tileId);
     
-    // Usar a mesma conversão inversa da função encodeToGrid36
-    const convertSIRGASToWGS84 = (easting: number, northing: number) => {
-      // Esta é a mesma conversão inversa simplificada usada no encode
-      const deltaX = easting - 5000000; // SIRGAS_PROJECTION_PARAMS.eastingAtFalseOrigin
-      const deltaY = northing - 10000000; // SIRGAS_PROJECTION_PARAMS.northingAtFalseOrigin
-      const longitude = -54 + (deltaX / 111320); // longitudeOfFalseOrigin
-      const latitude = -12 + (deltaY / 111320); // latitudeOfFalseOrigin
-      return { latitude, longitude };
-    };
-    
-    // Converter os cantos e centro usando a mesma lógica
+    // Converter os cantos e centro usando a conversão precisa
     const bottomLeft = convertSIRGASToWGS84(decoded.bounds.xmin, decoded.bounds.ymin);
     const center = convertSIRGASToWGS84(decoded.centroid.x, decoded.centroid.y);
     

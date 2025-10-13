@@ -2,7 +2,7 @@
  * Converter Screen - Interface principal para conversão GPS para SIRGAS
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -19,7 +19,7 @@ import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 
 import { useLocation } from '@/hooks/useLocation';
 import { useStorage } from '@/hooks/useStorage';
-import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel, encodeToGrid36 } from '@/utils/coordinateConversion';
+import { getTileSizeFromLevel, encodeToGrid36 } from '@/utils/coordinateConversion';
 import { useTheme } from '@/contexts/ThemeContext';
 import { StoredQuery, ConversionResult } from '@/types';
 import { format } from 'date-fns';
@@ -47,13 +47,21 @@ async function getAddressFromCoordinates(lat: number, lon: number): Promise<stri
   }
 }
 
-async function fetchWithTimeout(resource, options = {}, timeout = 8000) {
+/**
+ * Wraps fetch with an AbortController so we never wait indefinitely for a
+ * reverse-geocoding response.
+ */
+async function fetchWithTimeout(
+  resource: RequestInfo | URL,
+  options: RequestInit = {},
+  timeout = 8000
+): Promise<Response> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
   try {
     const response = await fetch(resource, { ...options, signal: controller.signal });
     return response;
-  } catch (error) {
+  } catch {
     throw new Error('Timeout ou falha na conexão');
   } finally {
     clearTimeout(id);
@@ -85,107 +93,134 @@ export default function ConverterScreen() {
 
   const [conversionResult, setConversionResult] = useState<ConversionResult | null>(null);
   const [isConverting, setIsConverting] = useState(false);
+  const requestIdRef = useRef(0);
 
-  // Request permission on mount
+  // ─── Derived Data ────────────────────────────────────────────────────────
+  const presetLevels = useMemo(() => [1, 3, 5, 7, 9], []);
+  const tileSizeMeters = useMemo(() => getTileSizeFromLevel(selectedLevel), [selectedLevel]);
+  const isDecreaseDisabled = selectedLevel === 1;
+  const isIncreaseDisabled = selectedLevel === 9;
+  const trackingLabel = isWatching ? 'Parar' : 'Rastrear';
+  const locationStatus = isWatching ? 'Rastreando' : 'Estático';
+
+  // ─── Helper Formatters ───────────────────────────────────────────────────
+  const formatCoordinate = useCallback((value: number, decimals = 6) => {
+    return value.toFixed(decimals);
+  }, []);
+
+  const formatDistance = useCallback((meters: number): string => {
+    if (meters >= 1000) {
+      return `${(meters / 1000).toFixed(1)} km`;
+    }
+    return `${meters.toFixed(0)} m`;
+  }, []);
+
+  // ─── Core Conversion Routine ─────────────────────────────────────────────
+  const performConversion = useCallback(
+    async (depthOverride?: number) => {
+      if (!currentLocation) return;
+
+      const depth = depthOverride ?? selectedLevel;
+
+      const requestId = ++requestIdRef.current;
+
+      setIsConverting(true);
+      setIsFetchingAddress(true);
+      setAddress(null);
+
+      try {
+        const grid36Result = encodeToGrid36(
+          currentLocation.longitude,
+          currentLocation.latitude,
+          depth
+        );
+
+        const result: ConversionResult = {
+          gps: currentLocation,
+          sirgas: {
+            easting: grid36Result.centroid.x,
+            northing: grid36Result.centroid.y,
+          },
+          tileId: grid36Result.hash,
+          level: depth,
+          tileSize: getTileSizeFromLevel(depth),
+          timestamp: Date.now(),
+        };
+
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
+
+        setConversionResult(result);
+
+        const storedQuery: StoredQuery = {
+          id: `${Date.now()}_${result.tileId}`,
+          ...result,
+          accuracy: currentLocation.accuracy,
+          locationName: `Lat: ${currentLocation.latitude.toFixed(6)}, Lon: ${currentLocation.longitude.toFixed(6)}`,
+        };
+
+        await saveQuery(storedQuery);
+
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
+
+        const foundAddress = await getAddressFromCoordinates(
+          currentLocation.latitude,
+          currentLocation.longitude
+        );
+        if (requestId === requestIdRef.current) {
+          setAddress(foundAddress);
+        }
+      } catch (error) {
+        console.error('Conversion error:', error);
+        Alert.alert('Erro', 'Falha ao converter coordenadas. Tente novamente.');
+      } finally {
+        if (requestId === requestIdRef.current) {
+          setIsConverting(false);
+          setIsFetchingAddress(false);
+        }
+      }
+    },
+    [currentLocation, selectedLevel, saveQuery]
+  );
+
+  // ─── Side Effects ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!hasPermission) {
       requestPermission();
     }
   }, [hasPermission, requestPermission]);
 
-  // Auto-convert when location or selected level changes
   useEffect(() => {
     if (currentLocation && hasPermission) {
       performConversion();
     }
-  }, [currentLocation, selectedLevel]);
+  }, [currentLocation, hasPermission, performConversion]);
 
-  const performConversion = async () => {
-    if (!currentLocation) return;
-
-    setIsConverting(true);
-
-    try {
-      // Convert coordinates and get Grid36 encoding
-      const grid36Result = encodeToGrid36(
-        currentLocation.longitude,
-        currentLocation.latitude,
-        selectedLevel
-      );
-
-      const result: ConversionResult = {
-        gps: currentLocation,
-        sirgas: {
-          easting: grid36Result.centroid.x,
-          northing: grid36Result.centroid.y
-        },
-        tileId: grid36Result.hash,
-        level: selectedLevel,
-        tileSize: grid36Result.tileSize,
-        timestamp: Date.now(),
-      };
-
-      setConversionResult(result);
-
-      // Save to history
-      const storedQuery: StoredQuery = {
-        id: `${Date.now()}_${result.tileId}`,
-        ...result,
-        accuracy: currentLocation.accuracy,
-        locationName: `Lat: ${currentLocation.latitude.toFixed(6)}, Lon: ${currentLocation.longitude.toFixed(6)}`,
-      };
-
-      await saveQuery(storedQuery);
-      setIsFetchingAddress(true);
-      try {
-        const foundAddress = await getAddressFromCoordinates(
-          currentLocation.latitude,
-          currentLocation.longitude
-        );
-        setAddress(foundAddress);
-      } finally {
-        setIsFetchingAddress(false);
-      }
-    } catch (error) {
-      console.error('Conversion error:', error);
-      Alert.alert('Erro', 'Falha ao converter coordenadas. Tente novamente.');
-    } finally {
-      setIsConverting(false);
-    }
-  };
-
-  const handleGetLocation = async () => {
+  // ─── Event Handlers ──────────────────────────────────────────────────────
+  const handleGetLocation = useCallback(async () => {
     if (!hasPermission) {
       const granted = await requestPermission();
       if (!granted) return;
     }
     await getCurrentLocation();
-  };
+  }, [getCurrentLocation, hasPermission, requestPermission]);
 
-  const handleToggleTracking = () => {
+  const handleToggleTracking = useCallback(() => {
     if (isWatching) {
       stopWatching();
     } else {
       startWatching();
     }
-  };
+  }, [isWatching, startWatching, stopWatching]);
 
-  const handleLevelChange = async (value: number) => {
-    // Grid36 uses depth 1-9 instead of level 0-17
+  const handleLevelChange = useCallback(async (value: number) => {
     const depth = Math.max(1, Math.min(9, Math.round(value)));
     await setSelectedLevel(depth);
-  };
-
-  const formatCoordinate = (value: number, decimals = 6) => {
-    return value.toFixed(decimals);
-  };
-
-  const formatDistance = (meters: number): string => {
-    if (meters >= 1000) {
-      return `${(meters / 1000).toFixed(1)} km`;
-    }
-    return `${meters.toFixed(0)} m`;
-  };
+    await performConversion(depth);
+  }, [performConversion, setSelectedLevel]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
@@ -194,15 +229,15 @@ export default function ConverterScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-          {/* Header */}
+          {/* ─── Header ─────────────────────────────────────────── */}
           <View style={styles.header}>
             <Text style={[styles.title, { color: theme.text }]}>Labubu Inc</Text>
             <Text style={[styles.subtitle, { color: theme.secondary }]}>Converte coordenadas GPS para tiles SIRGAS</Text>
           </View>
 
-          {/* Theme Toggle removido - usando botão flutuante global */}
+          {/* ─── Theme Toggle handled by global floating button ─── */}
 
-          {/* Permission Request */}
+          {/* ─── Permission Request ─────────────────────────────── */}
           {!hasPermission && (
             <View style={[styles.permissionCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
               <MaterialIcons name="location-off" size={48} color={theme.warning} />
@@ -216,7 +251,7 @@ export default function ConverterScreen() {
             </View>
           )}
 
-          {/* Location Controls */}
+          {/* ─── Location Controls ──────────────────────────────── */}
           {hasPermission && (
             <View style={[styles.controlsCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>Controles de Localização</Text>
@@ -254,7 +289,7 @@ export default function ConverterScreen() {
                     color="white"
                   />
                   <Text style={styles.controlButtonText} numberOfLines={1} adjustsFontSizeToFit>
-                    {isWatching ? 'Parar' : 'Rastrear'}
+                    {trackingLabel}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -268,22 +303,22 @@ export default function ConverterScreen() {
             </View>
           )}
 
-          {/* Tile Level Selector */}
+          {/* ─── Tile Level Selector ────────────────────────────── */}
           <View style={[styles.levelCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>Profundidade do Tile: {selectedLevel}</Text>
             <Text style={[styles.levelDescription, { color: theme.secondary }]}>
-              Tamanho do tile: {formatDistance(getTileSizeFromLevel(selectedLevel))}
+              Tamanho do tile: {formatDistance(tileSizeMeters)}
             </Text>
 
             <View style={styles.levelButtonsContainer}>
               <TouchableOpacity
                 style={[
                   styles.levelButton,
-                  { backgroundColor: selectedLevel === 1 ? theme.secondary : theme.primary },
-                  selectedLevel === 1 && styles.disabledButton
+                  { backgroundColor: isDecreaseDisabled ? theme.secondary : theme.primary },
+                  isDecreaseDisabled && styles.disabledButton
                 ]}
-                onPress={() => handleLevelChange(Math.max(1, selectedLevel - 1))}
-                disabled={selectedLevel === 1}
+                onPress={() => handleLevelChange(selectedLevel - 1)}
+                disabled={isDecreaseDisabled}
               >
                 <MaterialIcons name="remove" size={24} color="white" />
               </TouchableOpacity>
@@ -295,18 +330,18 @@ export default function ConverterScreen() {
               <TouchableOpacity
                 style={[
                   styles.levelButton,
-                  { backgroundColor: selectedLevel === 9 ? theme.secondary : theme.primary },
-                  selectedLevel === 9 && styles.disabledButton
+                  { backgroundColor: isIncreaseDisabled ? theme.secondary : theme.primary },
+                  isIncreaseDisabled && styles.disabledButton
                 ]}
-                onPress={() => handleLevelChange(Math.min(9, selectedLevel + 1))}
-                disabled={selectedLevel === 9}
+                onPress={() => handleLevelChange(selectedLevel + 1)}
+                disabled={isIncreaseDisabled}
               >
                 <MaterialIcons name="add" size={24} color="white" />
               </TouchableOpacity>
             </View>
 
             <View style={styles.presetLevels}>
-              {[1, 3, 5, 7, 9].map(level => (
+              {presetLevels.map(level => (
                 <TouchableOpacity
                   key={level}
                   style={[
@@ -318,12 +353,14 @@ export default function ConverterScreen() {
                   ]}
                   onPress={() => handleLevelChange(level)}
                 >
-                  <Text style={[
-                    styles.presetButtonText,
-                    {
-                      color: selectedLevel === level ? 'white' : theme.secondary,
-                    }
-                  ]}>
+                  <Text
+                    style={[
+                      styles.presetButtonText,
+                      {
+                        color: selectedLevel === level ? 'white' : theme.secondary,
+                      }
+                    ]}
+                  >
                     {level}
                   </Text>
                 </TouchableOpacity>
@@ -335,7 +372,7 @@ export default function ConverterScreen() {
             </Text>
           </View>
 
-          {/* Conversion Results */}
+          {/* ─── Conversion Results ─────────────────────────────── */}
           {conversionResult && (
             <View style={[styles.resultsCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>Resultados da Conversão</Text>
@@ -418,7 +455,7 @@ export default function ConverterScreen() {
                   </View>
                 </View>
               </View>
-              {/* Endereço Estimado */}
+              {/* Estimated Address */}
               {(isFetchingAddress || address) && (
                 <View style={[styles.addressSection, { backgroundColor: theme.surface, borderColor: theme.border }]}>
                   <View style={styles.tileTitleContainer}>
@@ -444,12 +481,12 @@ export default function ConverterScreen() {
             </View>
           )}
 
-          {/* Status Indicator */}
+          {/* ─── Status Indicator ───────────────────────────────── */}
           {currentLocation && (
             <View style={[styles.statusContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
               <View style={[styles.statusIndicator, { backgroundColor: theme.success }]} />
               <Text style={[styles.statusText, { color: theme.secondary }]}>
-                Localização ativa • {isWatching ? 'Rastreando' : 'Estático'}
+                Localização ativa • {locationStatus}
               </Text>
             </View>
           )}

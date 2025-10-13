@@ -1,22 +1,21 @@
 /**
- * Tile Search Utilities
- * Funcionalidades para busca reversa de tiles por ID
+ * Tile Search Utilities for Grid36 System
+ * Funcionalidades para busca reversa de tiles por ID usando Grid36
  */
 
-import { HilbertCurve } from './hilbertCurve';
-import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel } from './coordinateConversion';
+import { decodeFromGrid36, GLYPH_GRID } from './coordinateConversion';
 
-// Constantes do sistema SIRGAS
-const MARCO_ZERO_X = 5000000;
-const MARCO_ZERO_Y = 10000000;
-const Y_MAX_AREA = 12300000;
-const Y_MIN_AREA = 6300000;
-const X_MAX_AREA = 7330000;
-const X_MIN_AREA = 2290000;
+// Constantes do sistema Grid36
+const MARCO_ZERO_X = 5646767.0;
+const MARCO_ZERO_Y = 9567023.0;
+const X_MIN_AREA = 607919;
+const Y_MIN_AREA = 4528175;
+const X_MAX_AREA = 10685615;
+const Y_MAX_AREA = 14605871;
 
 export interface TileSearchResult {
   tileId: string;
-  level: number;
+  depth: number;
   tileSize: number;
   sirgas: {
     easting: number;
@@ -39,126 +38,48 @@ export interface TileSearchResult {
 }
 
 /**
- * Converte Base36 para número
+ * Busca informações de um tile pelo seu ID usando Grid36
  */
-function fromBase36(base36String: string): number {
-  const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const base = alphabet.length;
-  let result = 0;
-  
-  for (let i = 0; i < base36String.length; i++) {
-    const char = base36String[i].toUpperCase();
-    const value = alphabet.indexOf(char);
-    if (value === -1) {
-      throw new Error(`Invalid Base36 character: ${char}`);
-    }
-    result = result * base + value;
-  }
-  
-  return result;
-}
-
-/**
- * Conversão aproximada de SIRGAS para WGS84 (inversa simplificada)
- */
-function convertSIRGASToWGS84Approximate(easting: number, northing: number): { latitude: number; longitude: number } {
-  // Esta é uma conversão aproximada para visualização
-  // Para precisão real, seria necessário implementar a conversão inversa completa
-  
-  const SIRGAS_PROJECTION_PARAMS = {
-    latitudeOfFalseOrigin: -12,
-    longitudeOfFalseOrigin: -54,
-    firstStandardParallel: -2,
-    secondStandardParallel: -22,
-    eastingAtFalseOrigin: 5000000,
-    northingAtFalseOrigin: 10000000,
-    semiMajorAxis: 6378137,
-    flattening: 1 / 298.257222101
-  };
-
-  // Conversão simplificada baseada nas constantes da projeção
-  const deltaX = easting - SIRGAS_PROJECTION_PARAMS.eastingAtFalseOrigin;
-  const deltaY = northing - SIRGAS_PROJECTION_PARAMS.northingAtFalseOrigin;
-  
-  // Aproximação linear para a região do Brasil
-  const longitude = SIRGAS_PROJECTION_PARAMS.longitudeOfFalseOrigin + (deltaX / 111320);
-  const latitude = SIRGAS_PROJECTION_PARAMS.latitudeOfFalseOrigin + (deltaY / 111320);
-  
-  return { latitude, longitude };
-}
-
-/**
- * Busca informações de um tile pelo seu ID
- */
-export function searchTileById(tileId: string, level: number): TileSearchResult {
+export function searchTileById(tileId: string, depth: number): TileSearchResult {
   try {
-    // Converte o ID Base36 para distância Hilbert
-    const hilbertDistance = fromBase36(tileId);
+    // Use the Grid36 decoding system
+    const decoded = decodeFromGrid36(tileId);
     
-    // Calcula o tamanho do tile
-    const tileSize = getTileSizeFromLevel(level);
+    // Usar a mesma conversão inversa da função encodeToGrid36
+    const convertSIRGASToWGS84 = (easting: number, northing: number) => {
+      // Esta é a mesma conversão inversa simplificada usada no encode
+      const deltaX = easting - 5000000; // SIRGAS_PROJECTION_PARAMS.eastingAtFalseOrigin
+      const deltaY = northing - 10000000; // SIRGAS_PROJECTION_PARAMS.northingAtFalseOrigin
+      const longitude = -54 + (deltaX / 111320); // longitudeOfFalseOrigin
+      const latitude = -12 + (deltaY / 111320); // latitudeOfFalseOrigin
+      return { latitude, longitude };
+    };
     
-    // Calcula as dimensões do grid
-    const widthArea = X_MAX_AREA - X_MIN_AREA;
-    const heightArea = Y_MAX_AREA - Y_MIN_AREA;
-    const numTilesXTotal = Math.ceil(widthArea / tileSize);
-    const numTilesYTotal = Math.ceil(heightArea / tileSize);
-    const maxDim = Math.max(numTilesXTotal, numTilesYTotal);
-    const p = maxDim > 0 ? Math.ceil(Math.log2(maxDim)) : 1;
-    
-    // Cria a curva de Hilbert
-    const hilbertCurve = new HilbertCurve(Math.max(p, 1));
-    
-    // Converte distância Hilbert para coordenadas normalizadas
-    const { x: normalizedI, y: normalizedJ } = hilbertCurve.distanceToPoint(hilbertDistance);
-    
-    // Calcula os offsets de normalização
-    const minTileXIdxForLevel = Math.floor((X_MIN_AREA - (MARCO_ZERO_X - tileSize / 2)) / tileSize);
-    const minTileYIdxForLevel = Math.floor((Y_MIN_AREA - (MARCO_ZERO_Y - tileSize / 2)) / tileSize);
-    
-    // Converte para índices absolutos do tile
-    const iIdx = normalizedI + minTileXIdxForLevel;
-    const jIdx = normalizedJ + minTileYIdxForLevel;
-    
-    // Calcula as coordenadas SIRGAS do tile
-    const originXCentralTile = MARCO_ZERO_X - tileSize / 2;
-    const originYCentralTile = MARCO_ZERO_Y - tileSize / 2;
-    
-    const minEasting = originXCentralTile + iIdx * tileSize;
-    const minNorthing = originYCentralTile + jIdx * tileSize;
-    const maxEasting = minEasting + tileSize;
-    const maxNorthing = minNorthing + tileSize;
-    
-    // Centro do tile
-    const centerEasting = minEasting + (tileSize / 2);
-    const centerNorthing = minNorthing + (tileSize / 2);
-    
-    // Converte para WGS84 aproximado
-    const bottomLeftGPS = convertSIRGASToWGS84Approximate(minEasting, minNorthing);
-    const topRightGPS = convertSIRGASToWGS84Approximate(maxEasting, maxNorthing);
-    const centerGPS = convertSIRGASToWGS84Approximate(centerEasting, centerNorthing);
+    // Converter os cantos e centro usando a mesma lógica
+    const bottomLeft = convertSIRGASToWGS84(decoded.bounds.xmin, decoded.bounds.ymin);
+    const center = convertSIRGASToWGS84(decoded.centroid.x, decoded.centroid.y);
     
     return {
-      tileId,
-      level,
-      tileSize,
+      tileId: decoded.hash,
+      depth: decoded.depth,
+      tileSize: decoded.tileSize,
       sirgas: {
-        easting: minEasting,
-        northing: minNorthing,
-        centerEasting,
-        centerNorthing,
+        easting: decoded.bounds.xmin,
+        northing: decoded.bounds.ymin,
+        centerEasting: decoded.centroid.x,
+        centerNorthing: decoded.centroid.y,
       },
       gps: {
-        latitude: bottomLeftGPS.latitude,
-        longitude: bottomLeftGPS.longitude,
-        centerLatitude: centerGPS.latitude,
-        centerLongitude: centerGPS.longitude,
+        latitude: bottomLeft.latitude,
+        longitude: bottomLeft.longitude,
+        centerLatitude: center.latitude,
+        centerLongitude: center.longitude,
       },
       bounds: {
-        minEasting,
-        maxEasting,
-        minNorthing,
-        maxNorthing,
+        minEasting: decoded.bounds.xmin,
+        maxEasting: decoded.bounds.xmax,
+        minNorthing: decoded.bounds.ymin,
+        maxNorthing: decoded.bounds.ymax,
       },
     };
   } catch (error) {
@@ -167,13 +88,37 @@ export function searchTileById(tileId: string, level: number): TileSearchResult 
 }
 
 /**
- * Valida se um ID de tile está no formato correto (Base36)
+ * Valida se um ID de tile está no formato Grid36 correto
  */
 export function isValidTileId(tileId: string): boolean {
   if (!tileId || typeof tileId !== 'string') {
     return false;
   }
   
-  const base36Pattern = /^[0-9A-Z]+$/i;
-  return base36Pattern.test(tileId);
+  // Check length (1-9 characters for depth 1-9)
+  if (tileId.length < 1 || tileId.length > 9) {
+    return false;
+  }
+  
+  // Special case for reference tile
+  if (tileId === "000000000") {
+    return true;
+  }
+  
+  // Extract valid characters from GLYPH_GRID
+  const validChars = new Set<string>();
+  for (const row of GLYPH_GRID) {
+    for (const char of row) {
+      validChars.add(char);
+    }
+  }
+  
+  // Check if all characters are valid Grid36 symbols
+  for (const char of tileId.toUpperCase()) {
+    if (!validChars.has(char)) {
+      return false;
+    }
+  }
+  
+  return true;
 }

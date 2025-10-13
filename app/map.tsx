@@ -21,8 +21,7 @@ import MapView, { Marker } from 'react-native-maps';
 
 import { useLocation } from '@/hooks/useLocation';
 import { useStorage } from '@/hooks/useStorage';
-import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel } from '@/utils/coordinateConversion';
-import { getTileIdFromCoordinates } from '@/utils/hilbertCurve';
+import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel, encodeToGrid36 } from '@/utils/coordinateConversion';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ConversionResult } from '@/types';
 
@@ -69,25 +68,22 @@ export default function MapScreen() {
     setIsConverting(true);
 
     try {
-      const sirgas = convertWGS84ToSIRGASAlbers(
+      // Use Grid36 encoding directly
+      const grid36Result = encodeToGrid36(
         currentLocation.longitude,
-        currentLocation.latitude
-      );
-
-      const tileId = getTileIdFromCoordinates(
-        sirgas.easting,
-        sirgas.northing,
+        currentLocation.latitude,
         selectedLevel
       );
 
-      const tileSize = getTileSizeFromLevel(selectedLevel);
-
       const result: ConversionResult = {
         gps: currentLocation,
-        sirgas,
-        tileId,
+        sirgas: {
+          easting: grid36Result.centroid.x,
+          northing: grid36Result.centroid.y
+        },
+        tileId: grid36Result.hash,
         level: selectedLevel,
-        tileSize,
+        tileSize: grid36Result.tileSize,
         timestamp: Date.now(),
       };
 

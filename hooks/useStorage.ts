@@ -30,7 +30,7 @@ interface UseStorageReturn {
 
 export function useStorage(): UseStorageReturn {
   const [queryHistory, setQueryHistory] = useState<StoredQuery[]>([]);
-  const [selectedLevel, setSelectedLevelState] = useState<number>(10);
+  const [selectedLevel, setSelectedLevelState] = useState<number>(5); // Grid36 default depth
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,7 +61,8 @@ export function useStorage(): UseStorageReturn {
 
       if (levelData) {
         const parsedLevel = parseInt(levelData, 10);
-        if (!isNaN(parsedLevel) && parsedLevel >= 0 && parsedLevel <= 17) {
+        // Grid36 uses depth 1-9
+        if (!isNaN(parsedLevel) && parsedLevel >= 1 && parsedLevel <= 9) {
           setSelectedLevelState(parsedLevel);
         }
       }
@@ -119,13 +120,14 @@ export function useStorage(): UseStorageReturn {
   }, []);
 
   const setSelectedLevel = useCallback(async (level: number) => {
-    if (level < 0 || level > 17) throw new Error('Nível deve estar entre 0 e 17');
+    // Grid36 uses depth 1-9
+    if (level < 1 || level > 9) throw new Error('Profundidade deve estar entre 1 e 9');
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.SELECTED_LEVEL, level.toString());
       setSelectedLevelState(level);
     } catch (err) {
       console.error('Error saving selected level:', err);
-      setError('Erro ao salvar nível selecionado');
+      setError('Erro ao salvar profundidade selecionada');
     }
   }, []);
 

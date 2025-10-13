@@ -4,6 +4,8 @@
  * Based on the Python script provided
  */
 
+import proj4 from 'proj4';
+
 // Grid36 Constants (from Python backend)
 export const MARCO_ZERO_X = 5646767.0;
 export const MARCO_ZERO_Y = 9567023.0;
@@ -19,7 +21,7 @@ export const BASE = 6;
 export const MAX_DEPTH = 9;
 
 // Grid36 6x6 matrix (Glyph Grid)
-export const GLYPH_GRID = [
+const GLYPH_GRID = [
   ["Z","G","H","I","J","K"],
   ["Y","F","4","5","6","L"],
   ["X","E","3","0","7","M"],
@@ -40,41 +42,69 @@ export const SIRGAS_PROJECTION_PARAMS = {
   flattening: 1 / 298.257222101
 };
 
+// Define the SIRGAS 2000 Albers projection using WKT (same as Python)
+const SIRGAS_ALBERS_WKT = `PROJCS["SIRGAS_2000_Albers_Equal_Area",
+  GEOGCS["SIRGAS 2000",
+    DATUM["Sistema_de_Referencia_Geocentrico_para_America_del_Sur_2000",
+      SPHEROID["GRS 1980",6378137,298.257222101,AUTHORITY["EPSG","7019"]],
+      AUTHORITY["EPSG","6674"]],
+    PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],
+    UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],
+    AUTHORITY["EPSG","4674"]],
+  PROJECTION["Albers_Conic_Equal_Area"],
+  PARAMETER["latitude_of_center",-12],
+  PARAMETER["longitude_of_center",-54],
+  PARAMETER["standard_parallel_1",-2],
+  PARAMETER["standard_parallel_2",-22],
+  PARAMETER["false_easting",5000000],
+  PARAMETER["false_northing",10000000],
+  UNIT["metre",1,AUTHORITY["EPSG","9001"]]]`;
+
+// Define coordinate systems for proj4
+proj4.defs('EPSG:4674', '+proj=longlat +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +no_defs'); // SIRGAS 2000 Geographic
+proj4.defs('SIRGAS:ALBERS', SIRGAS_ALBERS_WKT);
+
+// Create transformers
+const wgs84ToSirgas = proj4('EPSG:4326', 'SIRGAS:ALBERS');
+const sirgasToWgs84 = proj4('SIRGAS:ALBERS', 'EPSG:4326');
+
 /**
  * Convert SIRGAS 2000 / Brazil Albers coordinates to WGS84
- * Simplified inverse transformation using bilinear approximation for Brazil region
+ * Using proj4js for accurate transformation
  */
 export function convertSIRGASToWGS84(easting: number, northing: number): { latitude: number; longitude: number } {
-  // For the Brazil region, use a simplified inverse transformation
-  // This is an approximation but should be more accurate than the linear one
-
-  // First, get a rough estimate using the linear approximation
-  const deltaX = easting - SIRGAS_PROJECTION_PARAMS.eastingAtFalseOrigin;
-  const deltaY = northing - SIRGAS_PROJECTION_PARAMS.northingAtFalseOrigin;
-
-  // Rough longitude and latitude estimates
-  let lon = SIRGAS_PROJECTION_PARAMS.longitudeOfFalseOrigin + (deltaX / 111320); // meters to degrees approx
-  let lat = SIRGAS_PROJECTION_PARAMS.latitudeOfFalseOrigin + (deltaY / 111320);
-
-  // Refine using iterative approach with the forward projection
-  for (let iter = 0; iter < 5; iter++) {
-    const { easting: calcEasting, northing: calcNorthing } = convertWGS84ToSIRGASAlbers(lon, lat);
-
-    const dEasting = easting - calcEasting;
-    const dNorthing = northing - calcNorthing;
-
-    // Approximate derivatives (meters per degree)
-    const dE_dLon = -111320 * Math.cos(lat * Math.PI / 180); // approx
-    const dN_dLat = 111320; // approx
-
-    // Update coordinates
-    lon += dEasting / dE_dLon;
-    lat += dNorthing / dN_dLat;
+  try {
+    const [longitude, latitude] = sirgasToWgs84.forward([easting, northing]);
+    return { latitude, longitude };
+  } catch (error) {
+    console.error('Error converting SIRGAS to WGS84:', error);
+    // Fallback to simple linear approximation if proj4 fails
+    const deltaX = easting - SIRGAS_PROJECTION_PARAMS.eastingAtFalseOrigin;
+    const deltaY = northing - SIRGAS_PROJECTION_PARAMS.northingAtFalseOrigin;
+    const latitude = SIRGAS_PROJECTION_PARAMS.latitudeOfFalseOrigin + deltaY / 111320;
+    const longitude = SIRGAS_PROJECTION_PARAMS.longitudeOfFalseOrigin + deltaX / 111320;
+    return { latitude, longitude };
   }
-
-  return { latitude: lat, longitude: lon };
 }
+/**
+ * Convert WGS84 coordinates to SIRGAS 2000 / Brazil Albers
+ * Using proj4js for accurate transformation
+ */
 export function convertWGS84ToSIRGASAlbers(longitude: number, latitude: number): { easting: number; northing: number } {
+  try {
+    const [easting, northing] = wgs84ToSirgas.forward([longitude, latitude]);
+    return { easting, northing };
+  } catch (error) {
+    console.error('Error converting WGS84 to SIRGAS:', error);
+    // Fallback to manual Albers calculation if proj4 fails
+    return convertWGS84ToSIRGASAlbersManual(longitude, latitude);
+  }
+}
+
+/**
+ * Manual Albers conversion (fallback)
+ */
+function convertWGS84ToSIRGASAlbersManual(longitude: number, latitude: number): { easting: number; northing: number } {
   // Convert degrees to radians
   const lon = (longitude * Math.PI) / 180;
   const lat = (latitude * Math.PI) / 180;
@@ -243,60 +273,59 @@ export function encodeToGrid36(longitude: number, latitude: number, depth: numbe
   centroid: { x: number; y: number; lon: number; lat: number };
   foraArea: boolean;
 } {
-  try {
-    // Validate inputs
-    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
-      throw new Error('Invalid coordinates');
-    }
-    if (depth < 1 || depth > 9) {
-      throw new Error('Depth must be between 1 and 9');
-    }
-
-    const { easting: x, northing: y } = convertWGS84ToSIRGASAlbers(longitude, latitude);
-    
-    const fora = !(X_MIN_AREA <= x && x < X_MAX_AREA && Y_MIN_AREA <= y && y < Y_MAX_AREA);
-    
-    // Clamp coordinates to valid area to avoid domain errors
-    const clampedX = Math.max(X_MIN_AREA, Math.min(X_MAX_AREA - 1, x));
-    const clampedY = Math.max(Y_MIN_AREA, Math.min(Y_MAX_AREA - 1, y));
-    
-    let i = Math.floor(clampedX - X_MIN_AREA);
-    let j = Math.floor(clampedY - Y_MIN_AREA);
-    
-    // Ensure i, j are within valid bounds
-    i = Math.max(0, Math.min(N - 1, i));
-    j = Math.max(0, Math.min(N - 1, j));
-    
-    const code = grid36EncodeIj(i, j, depth);
-    const [i0, j0, side] = grid36DecodeToOrigin(code);
-    const [cx, cy] = ijToXy(i0 + Math.floor(side/2), j0 + Math.floor(side/2));
-    
-    // Convert back to WGS84 for centroid
-    const { latitude: clat, longitude: clon } = convertSIRGASToWGS84(cx, cy);
-    
-    const result = {
-      hash: code,
-      depth,
-      tileSize: side,
-      ijOrigin: { i0, j0 },
-      centroid: { x: cx, y: cy, lon: clon, lat: clat },
-      foraArea: fora
-    };
-
-    // Verify result has required properties
-    if (!result.hash || typeof result.hash !== 'string') {
-      throw new Error('Failed to generate valid hash');
-    }
-
-    return result;
-  } catch (error) {
-    console.error('Error in encodeToGrid36:', error);
-    throw new Error(`Erro na codificação Grid36: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+  if (depth < 1 || depth > 9) {
+    throw new Error('Depth must be between 1 and 9');
   }
+
+  const { easting: x, northing: y } = convertWGS84ToSIRGASAlbers(longitude, latitude);
+  const foraArea = !(X_MIN_AREA <= x && x < X_MAX_AREA && Y_MIN_AREA <= y && y < Y_MAX_AREA);
+
+  const i = Math.floor(Math.max(X_MIN_AREA, Math.min(X_MAX_AREA - 1e-9, x)) - X_MIN_AREA);
+  const j = Math.floor(Math.max(Y_MIN_AREA, Math.min(Y_MAX_AREA - 1e-9, y)) - Y_MIN_AREA);
+
+  // Python-equivalent encoding logic
+  const N = X_MAX_AREA - X_MIN_AREA;
+  if (!(i >= 0 && i < N && j >= 0 && j < N)) {
+    throw new Error("i/j fora do domínio");
+  }
+
+  let code: string[] = [];
+  let rem_i = i;
+  let rem_j = j;
+  const POW6 = [1, 6, 36, 216, 1296, 7776, 46656, 279936, 1679616, 10077696];
+
+  for (let k = 8; k > 8 - depth; k--) {
+    const pow6k = POW6[k];
+    
+    const d_i = Math.floor(rem_i / pow6k);
+    rem_i %= pow6k;
+    
+    const d_j = Math.floor(rem_j / pow6k);
+    rem_j %= pow6k;
+
+    const row = 5 - Math.min(5, Math.max(0, d_j));
+    const col = Math.min(5, Math.max(0, d_i));
+    
+    code.push(GLYPH_GRID[row][col]);
+  }
+  
+  const finalHash = code.join('');
+  
+  // Decode to get tile properties
+  const decoded = decodeFromGrid36(finalHash);
+
+  return {
+    hash: finalHash,
+    depth: depth,
+    tileSize: decoded.tileSize,
+    ijOrigin: decoded.ijOrigin,
+    centroid: decoded.centroid,
+    foraArea: foraArea,
+  };
 }
 
 /**
- * Adjust hash depth by truncating or expanding
+ * Adjusts the depth of a given Grid36 hash by truncating or expanding
  */
 export function adjustHashDepth(hash: string, newDepth: number): string {
   if (newDepth < 1 || newDepth > 9) {

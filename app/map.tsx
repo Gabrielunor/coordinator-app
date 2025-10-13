@@ -21,7 +21,7 @@ import MapView, { Marker } from 'react-native-maps';
 
 import { useLocation } from '@/hooks/useLocation';
 import { useStorage } from '@/hooks/useStorage';
-import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel, encodeToGrid36, adjustHashDepth, decodeFromGrid36 } from '@/utils/coordinateConversion';
+import { encodeToGrid36 } from '@/utils/coordinateConversion';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ConversionResult } from '@/types';
 
@@ -68,37 +68,11 @@ export default function MapScreen() {
     setIsConverting(true);
 
     try {
-      let grid36Result;
-      
-      if (currentTileInfo && currentTileInfo.gps.latitude === currentLocation.latitude && 
-          currentTileInfo.gps.longitude === currentLocation.longitude) {
-        try {
-          const adjustedHash = adjustHashDepth(currentTileInfo.tileId, selectedLevel);
-          const decoded = decodeFromGrid36(adjustedHash);
-          
-          grid36Result = {
-            hash: adjustedHash,
-            depth: selectedLevel,
-            tileSize: getTileSizeFromLevel(selectedLevel),
-            ijOrigin: decoded.ijOrigin,
-            centroid: decoded.centroid,
-            foraArea: false
-          };
-        } catch (error) {
-          console.warn('Hash adjustment failed in map, falling back to full recalculation:', error);
-          grid36Result = encodeToGrid36(
-            currentLocation.longitude,
-            currentLocation.latitude,
-            selectedLevel
-          );
-        }
-      } else {
-        grid36Result = encodeToGrid36(
-          currentLocation.longitude,
-          currentLocation.latitude,
-          selectedLevel
-        );
-      }
+      const grid36Result = encodeToGrid36(
+        currentLocation.longitude,
+        currentLocation.latitude,
+        selectedLevel
+      );
 
       const result: ConversionResult = {
         gps: currentLocation,
@@ -118,7 +92,7 @@ export default function MapScreen() {
     } finally {
       setIsConverting(false);
     }
-  }, [currentLocation, selectedLevel, currentTileInfo]);
+  }, [currentLocation, selectedLevel]);
 
   useEffect(() => {
     if (currentLocation) {
@@ -145,7 +119,7 @@ export default function MapScreen() {
     } else {
       fadeAnim.setValue(0);
     }
-  }, [calculateTileInfo, currentLocation, fadeAnim]);
+  }, [currentLocation, selectedLevel]); // Removido calculateTileInfo das dependências
 
   const handleGetLocation = useCallback(async () => {
     if (!hasPermission) {
@@ -387,6 +361,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   cardTitle: { fontSize: 18, fontWeight: '600' },
+  locationInfo: {
+    gap: 4,
+  },
   coordinateValue: {
     fontSize: 13,
     fontWeight: '600',

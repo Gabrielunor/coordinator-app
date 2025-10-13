@@ -19,7 +19,7 @@ import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 
 import { useLocation } from '@/hooks/useLocation';
 import { useStorage } from '@/hooks/useStorage';
-import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel, encodeToGrid36, adjustHashDepth, decodeFromGrid36 } from '@/utils/coordinateConversion';
+import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel, encodeToGrid36 } from '@/utils/coordinateConversion';
 import { useTheme } from '@/contexts/ThemeContext';
 import { StoredQuery, ConversionResult } from '@/types';
 import { format } from 'date-fns';
@@ -130,38 +130,12 @@ export default function ConverterScreen() {
       try {
         let grid36Result;
         
-        // If we have existing conversion result and just changing depth, try to adjust hash
-        if (conversionResult && !forceRecalculate && depthOverride !== undefined) {
-          try {
-            const adjustedHash = adjustHashDepth(conversionResult.tileId, depth);
-            // Verify the adjusted hash is valid by decoding it
-            const decoded = decodeFromGrid36(adjustedHash);
-            
-            grid36Result = {
-              hash: adjustedHash,
-              depth: depth,
-              tileSize: getTileSizeFromLevel(depth),
-              ijOrigin: decoded.ijOrigin,
-              centroid: decoded.centroid,
-              foraArea: false
-            };
-          } catch (error) {
-            // Fallback to full recalculation
-            console.warn('Hash adjustment failed, falling back to full recalculation:', error);
-            grid36Result = encodeToGrid36(
-              currentLocation.longitude,
-              currentLocation.latitude,
-              depth
-            );
-          }
-        } else {
-          // Full calculation from GPS coordinates
-          grid36Result = encodeToGrid36(
-            currentLocation.longitude,
-            currentLocation.latitude,
-            depth
-          );
-        }
+        // Always do full calculation since we always use level 9
+        grid36Result = encodeToGrid36(
+          currentLocation.longitude,
+          currentLocation.latitude,
+          depth
+        );
 
         const result: ConversionResult = {
           gps: currentLocation,
@@ -247,7 +221,8 @@ export default function ConverterScreen() {
   const handleLevelChange = useCallback(async (value: number) => {
     const depth = Math.max(1, Math.min(9, Math.round(value)));
     await setSelectedLevel(depth);
-    await performConversion(depth);
+    // Recalculate using current GPS coordinates
+    await performConversion(depth, true); // Force recalculation
   }, [performConversion, setSelectedLevel]);
 
   return (

@@ -3,15 +3,18 @@
  * Funcionalidades para busca reversa de tiles por ID usando Grid36
  */
 
-import { decodeFromGrid36, GLYPH_GRID, convertSIRGASToWGS84 } from './coordinateConversion';
+import { decodeFromGrid36, getTileSizeFromLevel, convertSIRGASToWGS84 } from './coordinateConversion';
 
-// Constantes do sistema Grid36
-const MARCO_ZERO_X = 5646767.0;
-const MARCO_ZERO_Y = 9567023.0;
-const X_MIN_AREA = 607919;
-const Y_MIN_AREA = 4528175;
-const X_MAX_AREA = 10685615;
-const Y_MAX_AREA = 14605871;
+const GLYPH_GRID = [
+  ["Z","G","H","I","J","K"],
+  ["Y","F","4","5","6","L"],
+  ["X","E","3","0","7","M"],
+  ["W","D","2","1","8","N"],
+  ["V","C","B","A","9","O"],
+  ["U","T","S","R","Q","P"],
+];
+
+const VALID_CHARS = new Set(GLYPH_GRID.flat());
 
 export interface TileSearchResult {
   tileId: string;
@@ -41,6 +44,9 @@ export interface TileSearchResult {
  * Busca informações de um tile pelo seu ID usando Grid36
  */
 export function searchTileById(tileId: string): TileSearchResult {
+  if (!isValidTileId(tileId)) {
+    throw new Error(`ID de tile inválido: ${tileId}`);
+  }
   try {
     // Use the Grid36 decoding system
     const decoded = decodeFromGrid36(tileId);
@@ -84,31 +90,10 @@ export function isValidTileId(tileId: string): boolean {
   if (!tileId || typeof tileId !== 'string') {
     return false;
   }
-  
-  // Check length (1-9 characters for depth 1-9)
-  if (tileId.length < 1 || tileId.length > 9) {
-    return false;
-  }
-  
-  // Special case for reference tile
-  if (tileId === "000000000") {
-    return true;
-  }
-  
-  // Extract valid characters from GLYPH_GRID
-  const validChars = new Set<string>();
-  for (const row of GLYPH_GRID) {
-    for (const char of row) {
-      validChars.add(char);
-    }
-  }
-  
-  // Check if all characters are valid Grid36 symbols
-  for (const char of tileId.toUpperCase()) {
-    if (!validChars.has(char)) {
+  for (const char of tileId) {
+    if (!VALID_CHARS.has(char)) {
       return false;
     }
   }
-  
   return true;
 }

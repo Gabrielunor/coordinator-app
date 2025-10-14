@@ -24,7 +24,9 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "FOREGROUND_SERVICE",
-        "ACCESS_NETWORK_STATE"
+        "ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ],
       "softwareKeyboardLayoutMode": "pan",
       "package": "com.gabrielunor.frontend",
@@ -77,7 +79,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "22fd6ee0-a3ca-4c49-8863-32598ed9b6c5"
+        "projectId": "31300477-152c-47fa-8288-84220d42562c"
       }
     }
   }

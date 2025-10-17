@@ -2,9 +2,9 @@
  * Search Screen - Busca por ID de tile
  */
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Animated } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  Animated,
   View,
   Text,
   TextInput,
@@ -15,15 +15,14 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { MaterialIcons, Ionicons } from '@expo/vector-icons';
-import { format } from 'date-fns';
+import { MaterialIcons } from '@expo/vector-icons';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useStorage } from '@/hooks/useStorage';
 import { searchTileById, isValidTileId, TileSearchResult } from '@/utils/tileSearch';
-import { getTileSizeFromLevel } from '@/utils/coordinateConversion';
 import { StoredQuery } from '@/types';
 
 export default function SearchScreen() {
@@ -31,27 +30,44 @@ export default function SearchScreen() {
   const { saveQuery } = useStorage();
 
   const [searchTileId, setSearchTileId] = useState('');
-  const [searchLevel, setSearchLevel] = useState(5); // Grid36 uses depth 1-9
   const [searchResult, setSearchResult] = useState<TileSearchResult | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (searchResult) {
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      fadeAnim.setValue(0);
+    }
+  }, [fadeAnim, searchResult]);
+
   const handleSearch = async () => {
-    if (!searchTileId.trim()) {
+    const normalizedTileId = searchTileId.trim().toUpperCase();
+
+    if (!normalizedTileId) {
       Alert.alert('Erro', 'Por favor, insira um ID de tile para buscar');
       return;
     }
 
-    if (!isValidTileId(searchTileId.trim())) {
+    if (!isValidTileId(normalizedTileId)) {
       Alert.alert('Erro', 'ID de tile inválido. Use apenas caracteres do Grid36 (ex: Z, G, H, I, J, K, Y, F, 4, 5, 6, L, etc.)');
       return;
     }
 
+    Keyboard.dismiss();
     setIsSearching(true);
     setSearchError(null);
+    setSearchResult(null);
 
     try {
-      const result = searchTileById(searchTileId.trim().toUpperCase(), searchLevel);
+      const result = searchTileById(normalizedTileId);
       setSearchResult(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao buscar tile';
@@ -69,13 +85,13 @@ export default function SearchScreen() {
       const storedQuery: StoredQuery = {
         id: `search_${Date.now()}_${searchResult.tileId}`,
         gps: {
-          latitude: searchResult.gps.centerLatitude,
-          longitude: searchResult.gps.centerLongitude,
+          latitude: searchResult.gps.latitude,
+          longitude: searchResult.gps.longitude,
           timestamp: Date.now(),
         },
         sirgas: {
-          easting: searchResult.sirgas.centerEasting,
-          northing: searchResult.sirgas.centerNorthing,
+          easting: searchResult.sirgas.easting,
+          northing: searchResult.sirgas.northing,
         },
         tileId: searchResult.tileId,
         level: searchResult.depth, // Use depth instead of level
@@ -87,19 +103,16 @@ export default function SearchScreen() {
       await saveQuery(storedQuery);
       Alert.alert('Sucesso', 'Tile salvo no histórico');
     } catch (error) {
+      console.error('Falha ao salvar tile pesquisado no histórico', error);
       Alert.alert('Erro', 'Falha ao salvar no histórico');
     }
   };
 
-  const handleLevelChange = (newLevel: number) => {
-    // Grid36 uses depth 1-9
-    if (newLevel >= 1 && newLevel <= 9) {
-      setSearchLevel(newLevel);
-      // Se já temos um resultado, refaz a busca com o novo nível
-      if (searchResult && !isSearching) {
-        setSearchResult(null);
-      }
-    }
+  const handleResetSearch = () => {
+    setSearchResult(null);
+    setSearchTileId('');
+    setSearchError(null);
+    fadeAnim.setValue(0);
   };
 
   const formatCoordinate = (value: number, decimals = 6) => {
@@ -117,99 +130,40 @@ export default function SearchScreen() {
     <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
       <Text style={[styles.cardTitle, { color: theme.text }]}>Buscar por ID do Tile</Text>
 
-        {/* Input do ID */}
-        <View style={styles.inputContainer}>
-          <Text style={[styles.inputLabel, { color: theme.secondary }]}>ID do Tile (Grid36)</Text>
-          <TextInput
-            style={[
-              styles.textInput,
-              {
-                backgroundColor: theme.surface,
-                borderColor: theme.border,
-                color: theme.text,
-              }
-            ]}
-            value={searchTileId}
-            onChangeText={setSearchTileId}
-            placeholder="Digite o ID Grid36 (ex: ZGHIJK)"
-            placeholderTextColor={theme.secondary}
-            autoCapitalize="characters"
-            autoCorrect={false}
-            maxLength={9}
-          />
-        </View>
+      {/* Input do ID */}
+      <View style={styles.inputContainer}>
+        <Text style={[styles.inputLabel, { color: theme.secondary }]}>ID do Tile (Grid36)</Text>
+        <TextInput
+          style={[
+            styles.textInput,
+            {
+              backgroundColor: theme.surface,
+              borderColor: theme.border,
+              color: theme.text,
+            },
+          ]}
+          value={searchTileId}
+          onChangeText={value => setSearchTileId(value.toUpperCase())}
+          placeholder="Digite o ID Grid36 (ex: ZGHIJK)"
+          placeholderTextColor={theme.secondary}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          maxLength={9}
+          returnKeyType="search"
+          onSubmitEditing={handleSearch}
+        />
+      </View>
 
-        {/* Seletor de Profundidade */}
-        <View style={styles.inputContainer}>
-          <Text style={[styles.inputLabel, { color: theme.secondary }]}>
-            Profundidade: {searchLevel} (Tamanho: {formatDistance(getTileSizeFromLevel(searchLevel))})
-          </Text>
-
-          <View style={styles.levelButtonsContainer}>
-            <TouchableOpacity
-              style={[
-                styles.levelButton,
-                { backgroundColor: searchLevel === 1 ? theme.secondary : theme.primary },
-                searchLevel === 1 && styles.disabledButton
-              ]}
-              onPress={() => handleLevelChange(searchLevel - 1)}
-              disabled={searchLevel === 1}
-            >
-              <MaterialIcons name="remove" size={20} color="white" />
-            </TouchableOpacity>
-
-            <View style={[styles.levelDisplay, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <Text style={[styles.levelDisplayText, { color: theme.primary }]}>{searchLevel}</Text>
-            </View>
-
-            <TouchableOpacity
-              style={[
-                styles.levelButton,
-                { backgroundColor: searchLevel === 9 ? theme.secondary : theme.primary },
-                searchLevel === 9 && styles.disabledButton
-              ]}
-              onPress={() => handleLevelChange(searchLevel + 1)}
-              disabled={searchLevel === 9}
-            >
-              <MaterialIcons name="add" size={20} color="white" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.presetLevels}>
-            {[1, 3, 5, 7, 9].map(level => (
-              <TouchableOpacity
-                key={level}
-                style={[
-                  styles.presetButton,
-                  {
-                    backgroundColor: searchLevel === level ? theme.primary : theme.surface,
-                    borderColor: searchLevel === level ? theme.primary : theme.border,
-                  }
-                ]}
-                onPress={() => handleLevelChange(level)}
-              >
-                <Text style={[
-                  styles.presetButtonText,
-                  {
-                    color: searchLevel === level ? 'white' : theme.secondary,
-                  }
-                ]}>
-                  {level}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        {/* Botão de Busca */}
-        <TouchableOpacity
+      {/* Botão de Busca */}
+      <TouchableOpacity
         style={[
           styles.searchButton,
           { backgroundColor: theme.primary },
-          isSearching && styles.disabledButton
+          isSearching && styles.disabledButton,
         ]}
         onPress={handleSearch}
         disabled={isSearching}
+        accessibilityRole="button"
       >
         {isSearching ? (
           <ActivityIndicator color="white" size="small" />
@@ -224,20 +178,6 @@ export default function SearchScreen() {
   );
 
   const renderSearchResult = () => {
-    const fadeAnim = useRef(new Animated.Value(0)).current;
-
-    useEffect(() => {
-      if (searchResult) {
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }).start();
-      } else {
-        fadeAnim.setValue(0);
-      }
-    }, [searchResult]);
-
     if (!searchResult) return null;
 
     return (
@@ -272,10 +212,30 @@ export default function SearchScreen() {
           <Text style={[styles.tileIdValue, { color: theme.primary }]}>{searchResult.tileId}</Text>
         </View>
 
-        {/* Centro GPS */}
+        {/* Origem GPS */}
         <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
           <View style={styles.tileTitleContainer}>
             <MaterialIcons name="gps-fixed" size={16} color={theme.primary} />
+            <Text style={[styles.sectionLabel, { color: theme.secondary }]}>Origem (WGS84)</Text>
+          </View>
+          <View style={styles.coordinateRow}>
+            <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Latitude:</Text>
+            <Text style={[styles.coordinateValue, { color: theme.text }]}>
+              {formatCoordinate(searchResult.gps.latitude)}°
+            </Text>
+          </View>
+          <View style={styles.coordinateRow}>
+            <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Longitude:</Text>
+            <Text style={[styles.coordinateValue, { color: theme.text }]}>
+              {formatCoordinate(searchResult.gps.longitude)}°
+            </Text>
+          </View>
+        </View>
+
+        {/* Centro GPS */}
+        <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
+          <View style={styles.tileTitleContainer}>
+            <MaterialIcons name="center-focus-strong" size={16} color={theme.primary} />
             <Text style={[styles.sectionLabel, { color: theme.secondary }]}>Centro (WGS84)</Text>
           </View>
           <View style={styles.coordinateRow}>
@@ -292,10 +252,30 @@ export default function SearchScreen() {
           </View>
         </View>
 
-        {/* Centro SIRGAS */}
+        {/* Origem SIRGAS */}
         <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
           <View style={styles.tileTitleContainer}>
             <MaterialIcons name="straighten" size={16} color={theme.secondary} />
+            <Text style={[styles.sectionLabel, { color: theme.secondary }]}>Origem (SIRGAS Albers)</Text>
+          </View>
+          <View style={styles.coordinateRow}>
+            <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Easting (X):</Text>
+            <Text style={[styles.coordinateValue, { color: theme.text }]}>
+              {formatCoordinate(searchResult.sirgas.easting, 2)} m
+            </Text>
+          </View>
+          <View style={styles.coordinateRow}>
+            <Text style={[styles.coordinateLabel, { color: theme.secondary }]}>Northing (Y):</Text>
+            <Text style={[styles.coordinateValue, { color: theme.text }]}>
+              {formatCoordinate(searchResult.sirgas.northing, 2)} m
+            </Text>
+          </View>
+        </View>
+
+        {/* Centro SIRGAS */}
+        <View style={[styles.coordinateSection, { backgroundColor: theme.surface }]}>
+          <View style={styles.tileTitleContainer}>
+            <MaterialIcons name="center-focus-strong" size={16} color={theme.secondary} />
             <Text style={[styles.sectionLabel, { color: theme.secondary }]}>Centro (SIRGAS Albers)</Text>
           </View>
           <View style={styles.coordinateRow}>
@@ -336,10 +316,8 @@ export default function SearchScreen() {
         {/* Botão flutuante */}
         <TouchableOpacity
           style={[styles.refreshButton, { backgroundColor: theme.primary }]}
-          onPress={() => {
-            setSearchResult(null);
-            setSearchTileId('');
-          }}
+          onPress={handleResetSearch}
+          accessibilityRole="button"
         >
           <MaterialIcons name="refresh" size={22} color="white" />
         </TouchableOpacity>
@@ -394,8 +372,6 @@ export default function SearchScreen() {
   );
 }
 
-// Substitua o StyleSheet inteiro pelo código abaixo:
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -406,7 +382,8 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 20,
     paddingBottom: 60,
-  }, levelBadge: {
+  },
+  levelBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -573,8 +550,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginLeft: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   tileTitleContainer: {
     flexDirection: 'row',

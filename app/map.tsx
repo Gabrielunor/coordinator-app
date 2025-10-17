@@ -21,7 +21,7 @@ import MapView, { Marker } from 'react-native-maps';
 
 import { useLocation } from '@/hooks/useLocation';
 import { useStorage } from '@/hooks/useStorage';
-import { convertWGS84ToSIRGASAlbers, getTileSizeFromLevel, encodeToGrid36 } from '@/utils/coordinateConversion';
+import { encodeToGrid36 } from '@/utils/coordinateConversion';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ConversionResult } from '@/types';
 
@@ -68,7 +68,6 @@ export default function MapScreen() {
     setIsConverting(true);
 
     try {
-      // Use Grid36 encoding directly
       const grid36Result = encodeToGrid36(
         currentLocation.longitude,
         currentLocation.latitude,
@@ -120,7 +119,7 @@ export default function MapScreen() {
     } else {
       fadeAnim.setValue(0);
     }
-  }, [calculateTileInfo, currentLocation, fadeAnim]);
+  }, [currentLocation, selectedLevel]); // Removido calculateTileInfo das dependências
 
   const handleGetLocation = useCallback(async () => {
     if (!hasPermission) {
@@ -362,6 +361,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   cardTitle: { fontSize: 18, fontWeight: '600' },
+  locationInfo: {
+    gap: 4,
+  },
   coordinateValue: {
     fontSize: 13,
     fontWeight: '600',
